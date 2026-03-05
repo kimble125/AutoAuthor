@@ -187,3 +187,7 @@ mvforrest_seo_secrets.py
 
 # Results
 results/
+
+# Analysis output files (personal data)
+*.csv
+*.txt
