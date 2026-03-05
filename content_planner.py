@@ -12,6 +12,12 @@ content_planner.py — AI 기획안 자동 생성 모듈 (V5)
 
 [실행 방법]
   pip install requests beautifulsoup4 google-generativeai
+  
+  # CLI 모드 (권장)
+  python content_planner.py --title "휴민트" --type "영화"
+  python content_planner.py --title "1987" --type "영화" --num-proposals 5
+  
+  # 대화형 모드 (인자 없이 실행)
   python content_planner.py
 
 [AI 모델 안내]
@@ -23,6 +29,7 @@ content_planner.py — AI 기획안 자동 생성 모듈 (V5)
     - Ollama 로컬 실행 (인터넷 불필요, 개인정보 보호)
 """
 
+import argparse
 import requests
 import re
 import time
@@ -91,6 +98,111 @@ CONFIG = {
     # 기획안 후보 수
     "NUM_PROPOSALS": 3,
 }
+
+
+# ╔══════════════════════════════════════════════════════════════╗
+# ║                   🎯 CLI 인자 파싱                             ║
+# ╚══════════════════════════════════════════════════════════════╝
+
+def _build_arg_parser() -> argparse.ArgumentParser:
+    """CLI 인자 파서 생성"""
+    p = argparse.ArgumentParser(
+        description="AutoAuthor Content Planner - AI 기획안 자동 생성",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+사용 예시:
+  # 작품명과 유형 지정
+  python content_planner.py --title "휴민트" --type "영화"
+  
+  # 기획안 5개 생성
+  python content_planner.py --title "1987" --type "영화" --num-proposals 5
+  
+  # Gemini 모델 변경
+  python content_planner.py --title "오징어게임" --type "드라마" --gemini-model "gemini-2.5-flash"
+  
+  # 대화형 모드 (인자 없이 실행)
+  python content_planner.py
+"""
+    )
+    
+    # 필수 인자
+    p.add_argument(
+        "--title",
+        type=str,
+        default="",
+        help="분석할 작품명 (예: '휴민트', '1987')"
+    )
+    
+    p.add_argument(
+        "--type",
+        choices=["영화", "드라마", "애니메이션", "쇼", "웹툰"],
+        default="",
+        help="콘텐츠 유형 선택"
+    )
+    
+    # 선택적 인자
+    p.add_argument(
+        "--gemini-key",
+        type=str,
+        default="",
+        help="Gemini API 키 (설정하지 않으면 CONFIG 사용)"
+    )
+    
+    p.add_argument(
+        "--gemini-model",
+        type=str,
+        choices=["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"],
+        default="",
+        help="사용할 Gemini 모델 (기본값: gemini-2.5-pro)"
+    )
+    
+    p.add_argument(
+        "--output-dir",
+        type=str,
+        default="",
+        help="결과 저장 디렉토리 (기본값: results)"
+    )
+    
+    p.add_argument(
+        "--num-proposals",
+        type=int,
+        default=0,
+        help="생성할 기획안 후보 수 (기본값: 3)"
+    )
+    
+    p.add_argument(
+        "--sleep-time",
+        type=float,
+        default=0,
+        help="API 요청 간격(초) (기본값: 0.5)"
+    )
+    
+    return p
+
+
+def run_cli(argv=None):
+    """CLI 모드 실행 함수"""
+    parser = _build_arg_parser()
+    args = parser.parse_args(argv)
+    
+    # CLI 인자로 CONFIG 덮어쓰기
+    if args.title:
+        CONFIG["CONTENT_TITLE"] = args.title
+    if args.type:
+        CONFIG["CONTENT_TYPE"] = args.type
+    if args.gemini_key:
+        CONFIG["GEMINI_API_KEY"] = args.gemini_key
+    if args.gemini_model:
+        CONFIG["GEMINI_MODEL"] = args.gemini_model
+    if args.output_dir:
+        CONFIG["OUTPUT_DIR"] = args.output_dir
+    if args.num_proposals > 0:
+        CONFIG["NUM_PROPOSALS"] = args.num_proposals
+    if args.sleep_time > 0:
+        CONFIG["SLEEP_TIME"] = args.sleep_time
+    
+    # 메인 함수 실행
+    main()
 
 
 # ╔══════════════════════════════════════════════════════════════╗
@@ -470,7 +582,7 @@ def main():
     print("  화제성 키워드 수집 → 포화도 측정 → AI 기획안 자동 생성")
     print("=" * 60)
 
-    # 작품 정보 입력
+    # 작품 정보 입력 (CONFIG 또는 대화형 입력)
     title = CONFIG["CONTENT_TITLE"]
     if not title:
         title = input("\n📌 분석할 작품명을 입력하세요: ").strip()
@@ -519,4 +631,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run_cli()
