@@ -155,6 +155,7 @@ def get_google_suggestions(seed: str) -> list[str]:
     max_retries = 3
     base_delay = 0.8
     last_err = None
+      resp = None  # 예외 발생 시 UnboundLocalError 방지
     for attempt in range(1, max_retries + 1):
         try:
             resp = requests.get(
