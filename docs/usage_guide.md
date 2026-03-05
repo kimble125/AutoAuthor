@@ -11,7 +11,7 @@ python --version  # Python 3.8 이상이어야 합니다
 ### Step 2. 리포지토리 클론
 
 ```bash
-git clone https://github.com/kimble125/content-trend-seo-toolkit.git
+git clone https://github.com/kimble125/AutoAuthor.git
 cd content-trend-seo-toolkit
 ```
 
