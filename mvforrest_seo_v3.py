@@ -66,7 +66,7 @@ MAX_WORDS = 6
 REQUEST_DELAY = 0.8
 
 # 결과 저장 폴더
-OUTPUT_DIR = "output_preview"
+OUTPUT_DIR = "results"
 
 NAVER_CLIENT_ID = ""
 NAVER_CLIENT_SECRET = ""
