@@ -12,7 +12,7 @@ python --version  # Python 3.8 이상이어야 합니다
 
 ```bash
 git clone https://github.com/kimble125/AutoAuthor.git
-cd content-trend-seo-toolkit
+cd AutoAuthor
 ```
 
 ### Step 3. 라이브러리 설치
