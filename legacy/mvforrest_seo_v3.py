@@ -633,7 +633,33 @@ def save_results(
     output_dir: str,
     mode_label: str = "일반",
 ) -> tuple[str, str]:
-    """분석 결과를 CSV와 텍스트 리포트로 저장합니다."""
+    """분석 결과를 CSV, 텍스트 리포트, 그리고 데이터베이스(V6 연동용)에 저장합니다."""
+    
+    # DB (data/autoauthor.db) 저장 로직 추가
+    import sqlite3
+    import os
+    db_path = "data/autoauthor.db"
+    os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
+    try:
+        conn = sqlite3.connect(db_path)
+        c = conn.cursor()
+        for r in results:
+            kw = r['keyword']
+            norm_kw = kw.replace(' ', '')
+            c.execute("INSERT OR IGNORE INTO keywords (keyword, normalized_keyword, search_intent) VALUES (?, ?, ?)", (kw, norm_kw, r['search_intent']))
+            c.execute("SELECT id FROM keywords WHERE normalized_keyword = ?", (norm_kw,))
+            row = c.fetchone()
+            if row:
+                c.execute("""INSERT INTO keyword_analyses 
+                    (keyword_id, blog_competition, view_competition, opportunity_score, saturation_grade, has_demand)
+                    VALUES (?, ?, ?, ?, ?, ?)""", 
+                    (row[0], r['blog_competition'], r['view_competition'], r['score'], r['grade'], 1 if r['has_demand'] else 0))
+        conn.commit()
+    except Exception as e:
+        print(f"  ⚠️ V6 DB 연동 저장 실패: {e}")
+    finally:
+        if 'conn' in locals(): conn.close()
+
     os.makedirs(output_dir, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     csv_path = os.path.join(output_dir, f"키워드분석_{mode_label}_{timestamp}.csv")
