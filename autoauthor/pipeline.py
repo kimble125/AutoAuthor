@@ -12,7 +12,7 @@ from .trend_detector import TrendDetector, TrendReport
 from .sources import (
     NaverDataLabSource, GoogleTrendsSource, TMDBSource,
     GoogleNewsSource, GoogleSuggestSource, WatchaPediaSource,
-    BaseTrendSource,
+    KakaoSource, BaseTrendSource,
 )
 from .ai.engine_chain import create_default_chain
 from .planner.content_generator import ContentGenerator
@@ -41,6 +41,7 @@ class AutoAuthorPipeline:
         self.config = config or load_config()
         self._detector: Optional[TrendDetector] = None
         self._generator: Optional[ContentGenerator] = None
+        self._kakao: Optional[KakaoSource] = None
         self._repo: Optional[Repository] = None
 
     def _init_sources(self) -> list[BaseTrendSource]:
@@ -72,6 +73,12 @@ class AutoAuthorPipeline:
             )
             self._generator = ContentGenerator(chain)
         return self._generator
+
+    @property
+    def kakao(self) -> KakaoSource:
+        if self._kakao is None:
+            self._kakao = KakaoSource(self.config.kakao_api_key)
+        return self._kakao
 
     @property
     def repo(self) -> Repository:
@@ -264,6 +271,9 @@ class AutoAuthorPipeline:
             
             # ─ 유튜브: 영상 수 + 상위 영상 평균 조회수
             yt_videos, yt_avg_views = await self._measure_youtube_supply(kw)
+
+            # ─ 카카오/다음: 블로그 누적 문서 수
+            kakao_docs = await self.kakao.get_blog_count(kw)
             
             # ─ 추천(네이버): 포화율 기반 (블로그문서량 ÷ 키워드에 대한 수요지표)
             if naver_market > 0:
@@ -295,6 +305,23 @@ class AutoAuthorPipeline:
             else:
                 yt_stars = "-"
 
+            # ─ 추천(다음): 포화율 기반 (다음 블로그문서량 ÷ 네이버 수요지표 프록시)
+            if naver_market > 0:
+                kakao_ratio = kakao_docs / naver_market
+                if kakao_ratio <= 0.01:
+                    kakao_stars = "★★★"
+                elif kakao_ratio <= 0.1:
+                    kakao_stars = "★★"
+                else:
+                    kakao_stars = "★"
+            else:
+                if kakao_docs <= 500:
+                    kakao_stars = "★★★"
+                elif kakao_docs <= 5000:
+                    kakao_stars = "★★"
+                else:
+                    kakao_stars = "★"
+
             results.append({
                 "keyword": kw,
                 "intent": self._classify_intent(kw),
@@ -307,6 +334,9 @@ class AutoAuthorPipeline:
                 "yt_videos": yt_videos,
                 "yt_avg_views": yt_avg_views,
                 "yt_stars": yt_stars,
+                # 카카오
+                "kakao_docs": kakao_docs,
+                "kakao_stars": kakao_stars,
                 # DB 호환용
                 "market_size": naver_market,
                 "supply_raw": blog_docs,
@@ -479,6 +509,8 @@ class AutoAuthorPipeline:
                     "유튜브영상수": a["yt_videos"],
                     "평균조회수(유튜브)": a["yt_avg_views"],
                     "추천(유튜브)": a["yt_stars"],
+                    "다음문서량": a["kakao_docs"],
+                    "추천(다음)": a["kakao_stars"],
                 })
         if rows:
             os.makedirs("results", exist_ok=True)
@@ -550,7 +582,7 @@ async def _cli_main():
     parser.add_argument("--mode", choices=["copilot", "autopilot"], default="autopilot")
     parser.add_argument("--category", default="movie")
     parser.add_argument("--top", type=int, default=3)
-    parser.add_argument("--platforms", default="tistory", help="콤마 구분: tistory,shortform,youtube")
+    parser.add_argument("--platforms", default="tistory", help="콤마 구분: tistory,naver,youtube,instagram,facebook,shortform,thread")
     args = parser.parse_args()
 
     platforms = [p.strip() for p in args.platforms.split(",")]

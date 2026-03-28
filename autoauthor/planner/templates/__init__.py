@@ -2,6 +2,7 @@
 from .tistory_blog import TistoryBlogTemplate
 from .youtube_script import YoutubeScriptTemplate
 from .instagram_card import InstagramCardTemplate
+from .facebook_post import FacebookPostTemplate
 from .shortform import ShortformTemplate
 from .thread_x import ThreadXTemplate
 from .naver_blog import NaverBlogTemplate
@@ -11,6 +12,7 @@ PLATFORM_TEMPLATES = {
     "naver": NaverBlogTemplate,
     "youtube": YoutubeScriptTemplate,
     "instagram": InstagramCardTemplate,
+    "facebook": FacebookPostTemplate,
     "shortform": ShortformTemplate,
     "thread": ThreadXTemplate,
 }

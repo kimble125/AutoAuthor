@@ -26,6 +26,9 @@ class AutoAuthorConfig:
     # YouTube
     youtube_api_key: str = ""
 
+    # Kakao
+    kakao_api_key: str = ""
+
     # Optional sources
     enable_watcha_pedia: bool = True
     enable_theqoo: bool = False  # 기본 비활성
@@ -77,6 +80,7 @@ def load_config() -> AutoAuthorConfig:
         "TMDB_API_KEY": "tmdb_api_key",
         "TMDB_READ_ACCESS_TOKEN": "tmdb_read_access_token",
         "YOUTUBE_API_KEY": "youtube_api_key",
+        "KAKAO_API_KEY": "kakao_api_key",
         "OLLAMA_BASE_URL": "ollama_base_url",
         "OLLAMA_MODEL": "ollama_model",
     }
