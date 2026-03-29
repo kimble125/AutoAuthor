@@ -29,25 +29,30 @@
 
 ---
 
-## 시스템 아키텍처 | Architecture
+## 시스템 아키텍처 | Core Architecture
+
+비용과 효율을 극대화한 **2-Pass 지연 평가(Lazy Evaluation) 아키텍처**를 채택했습니다.
 
 ```
 [데이터 발굴 레이어]
-  TMDB (화제작 정보) ──┐
-  Google News RSS   ──┤
-  WatchaPedia       ──┤──→ [발굴된 시드 키워드]
-  Google Suggest    ──┘            │
-                                   ↓
-[멀티 플랫폼 평가 레이어]  ← [시장 규모 및 공급 측정]
-  Naver Ad API (검색량) ──┐        │
-  Naver Blog (문서수)   ──┼──→ [플랫폼별 포화율 산출] ──→ [★★★ 황금 키워드]
-  YouTube API (조회수)  ──┤        (공급 ÷ 수요)                │
-  Kakao API (검색결과)  ──┘                                     ↓
-                                                       [Gemini 2.5 Flash]
-                                                                │
-                                                                ↓
-                                                     [플랫폼별 기획안 생성]
-                                                     (네이버/유튜브/티스토리)
+  TMDB / WatchaPedia ─────┐
+  Google News RSS    ─────┼──→ [발굴된 시드 키워드 (최대 30개)] ──┐
+  Google Suggest     ─────┘                                   │
+                                                              ↓
+[1차 필터링 (비용 최소화)] ← [대규모 시장 수요 및 블로그 공급 측정]
+  Naver Ad API (검색량)    ──┐       
+  Google Trends API (가중치)─┼──→ [통합 수요 산출] 
+  Naver Blog (문서수)      ──┼──→ [네이버/티스토리 포화도 랭킹] ──┐
+  Kakao API (검색결과)     ──┘                                   │
+                                                              │ (Top 5 추출)
+[2차 지연 평가 (고정밀)] ← [알짜 키워드 특화 분석]                 │
+  YouTube API (에버그린 조회수) ───←──────────────────────────────┘
+  YouTube API (트렌디 30일 영상수) ──→ [유튜브 포화율 산출 및 ★★★ 판별]
+                                                          │
+                                                          ↓
+[Synergy Content Engine]  ← [Gemini 2.5 Pro / Flash]
+  개별 플랫폼 기획안 생성 (네이버/티스토리/유튜브 등)
+  다중 작품 연계 시너지(허브) 기획안 자동 생성 (OSMU 체류시간 극대화)
 ```
 
 ---
@@ -74,23 +79,18 @@ AutoAuthor/
 ├── README.md
 ├── LICENSE                            # MIT License
 ├── requirements.txt
-├── mvforrest_seo_v3.py                # SEO 키워드 분석기 (CLI 지원)
-├── mvforrest_seo_config.example.py    # API 키 설정 템플릿
-├── content_planner.py                 # AI 기획안 자동 생성기 (풀 파이프라인)
-├── profiles/
-│   └── latest.json                    # 프로필 설정 예시
-├── results/
-│   └── sample_output.csv              # 샘플 분석 결과
-└── docs/
-    ├── usage_guide.md                 # 상세 사용 가이드
-    └── 콘텐츠_성장_전략_가이드.md       # 채널 통합 성장 전략
+├── autoauthor/                        # 코어 패키지 모듈
+│   ├── pipeline.py                    # 메인 실행 파이프라인 엔진 (V8)
+│   ├── sources/                       # 데이터 수집 채널 (각 리포트 추적)
+│   ├── ai/                            # Gemini 2.5 AI 통합 레이어
+│   └── planner/                       # 기획안 생성 및 템플릿 관리 모듈
+├── .env.example                       # API 키 환경 변수 예시
+└── results/                           # 각종 CSV 및 기획안(.md) 출력물 저장소
 ```
 
 ---
 
-## 빠른 시작 | Quick Start
-
-### 1. 설치
+### 1. 설치 (Installation)
 
 ```bash
 git clone https://github.com/kimble125/AutoAuthor.git
@@ -98,75 +98,83 @@ cd AutoAuthor
 pip install -r requirements.txt
 ```
 
-### 2. API 키 설정
+### 2. 환경 변수 설정 (.env)
+
+프로젝트 루트에 `.env` 파일을 생성하고 아래 API 키를 입력합니다.
+*(API 할당량 초과 방지를 위해 여러 개의 유튜브 키를 활용할 수 있습니다.)*
+
+```env
+NAVER_CLIENT_ID="발급받은 ID"
+NAVER_CLIENT_SECRET="발급받은 Secret"
+KAKAO_API_KEY="Kakao REST API 키"
+YOUTUBE_API_KEY="Google Cloud 키"
+GEMINI_API_KEY="Google AI Studio 키"
+```
+
+### 3. CLI 실행 (Execution)
+
+AutoAuthor 파이프라인은 모듈화된 명령어로 가장 쉽고 강력하게 작동합니다.
 
 ```bash
-# config 파일 복사 후 API 키 입력
-cp mvforrest_seo_config.example.py mvforrest_seo_config.py
+# 수동 타겟 분석 (기획안 자동 `.md` 파일 저장)
+python3 -m autoauthor --titles "마션, 인터스텔라, 그래비티"
+
+# 타겟 플랫폼 지정 및 연계 시너지 기획
+python3 -m autoauthor --titles "마션, 인터스텔라" --platforms "tistory,youtube,synergy"
+
+# 전자동 트렌드 탐지 및 기획 (Autopilot)
+python3 -m autoauthor --mode autopilot --top 5
 ```
 
-```python
-# mvforrest_seo_config.py
-NAVER_CLIENT_ID = ""           # https://developers.naver.com 에서 발급
-NAVER_CLIENT_SECRET = ""
-USE_NAVER_OPENAPI = True
-GEMINI_API_KEY = ""            # https://aistudio.google.com 에서 무료 발급
-```
+### 4. 결과 출력 (Output)
 
-### 3. CLI 실행
-
-```bash
-# 단일 작품 분석
-python mvforrest_seo_v3.py --seed "프리렌" --seed "장송의 프리렌"
-
-# 두 키워드 비교 (정식 제목 vs 줄임말)
-python mvforrest_seo_v3.py --seed "이 사랑 통역 되나요" --seed "이사통" --no-cross-mode
-
-# 프로필 파일로 실행 (복잡한 설정 시)
-python mvforrest_seo_v3.py --profile profiles/latest.json
-
-# 크로스 키워드 모드 (두 주제를 엮는 키워드 발굴)
-python mvforrest_seo_v3.py --cross-mode --cross-topic "계엄|영화 1987"
-
-# AI 기획안까지 자동 생성 (풀 파이프라인)
-python content_planner.py
-```
-
-### 4. 결과 확인
-
-`output_preview/` 폴더에 CSV 파일과 텍스트 리포트가 자동 생성됩니다.
-
+실행이 완료되면 `results/` 폴더에 아래의 에셋들이 자동 구성됩니다.
+*   `키워드분석_통합_수동분석_YYYYMMDD.csv` (데이터 리포트)
+*   `기획안_마션_tistory_YYYYMMDD.md` (개별 플랫폼 기획안)
+*   `기획안__통합__3개_작품_연계_추천_가이드_synergy.md` (내부링크 연계 허브 기획안)
 ---
 
 ## CLI 옵션 | CLI Options
 
-| 옵션 | 설명 | 기본값 |
-|---|---|---|
-| `--seed` | 시드 키워드 (반복 가능) | — |
-| `--depth` | 롱테일 탐색 깊이 | 2 |
-| `--min-words` | 최소 단어 수 | 1 |
-| `--max-words` | 최대 단어 수 | 7 |
-| `--profile` | JSON 프로필 파일 경로 | — |
-| `--cross-mode` | 크로스 키워드 모드 활성화 | false |
-| `--no-cross-mode` | 크로스 키워드 모드 비활성화 | — |
-| `--cross-topic` | 크로스 토픽 (형식: `"주제A\|주제B"`) | — |
-| `--request-delay` | 요청 간격 (초) | 0.5 |
-| `--output-dir` | 결과 저장 디렉토리 | output_preview/ |
+| 변수명 | 필수 여부 | 설명 | 기본값 |
+|---|---|---|---|
+| `--mode` | 선택 | 실행 모드. `autopilot`(자동 트렌드 기반) 또는 `copilot` | `autopilot` |
+| `--category` | 선택 | 분석 카테고리 (예: `movie`, `drama`) | `movie` |
+| `--top` | 선택 | autopilot 모드 시 상위 몇 개의 트렌드를 검색할지 지정 | `3` |
+| `--platforms` | 선택 | 기획안을 생성할 타겟 플랫폼 (콤마로 다중 선택 가능) <br>지원: `tistory, naver, youtube, instagram, facebook, shortform, thread, synergy` | `tistory` |
+| `--titles` | 선택 | 트렌드 탐지를 스킵하고 원하는 작품명 수동 지정 <br>예: `"프로젝트 헤일메리, 마션"`| — |
 
 ---
 
-## 개발 철학 | Development Philosophy
+## 개발 철학 | Development Philosophy (For 1-Person Business Marketer)
 
-AutoAuthor는 **"데이터가 주도하는 콘텐츠 원 소스 멀티 유즈(OSMU)"**를 지향합니다.
-1. **정밀함(Precision)**: 프록시 데이터에 의존하지 않고, 실제 광고 API 수준의 검색 데이터를 활용합니다.
-2. **효율성(Efficiency)**: 한 번의 분석으로 네이버, 유튜브, 인스타그램 등 여러 채널의 전략을 동시에 수립합니다.
-3. **기회(Opportunity)**: 플랫폼 간의 데이터 격차를 포착하여, 남들이 보지 못하는 블루오션을 선점하게 돕습니다.
+AutoAuthor는 1인 마케터의 **최대 효율(OSMU)과 한정된 리소스 관리**를 지향하며 아래 3원칙으로 설계되었습니다.
+
+1. **지능형 비용 제어 (Intelligent Lazy Evaluation)**
+   - 유튜브 API의 `10,000` 쿼터 한도 문제를 회피하기 위해 무차별 탐색을 폐기. 무료인 네이버 블로그 문서량으로 시장을 1단계 필터링하고, 잠재력 있는 상위 5개 키워드만 정밀 평가하는 **2-Pass 지연 평가(Lazy Evaluation)** 아키텍처로 API 소모 비용을 83% 감축했습니다.
+
+2. **단기 바이럴과 장기 수익의 투 트랙 (Trendy vs Evergreen)**
+   - 오늘 당장 터지는 키워드(최근 30일 데이터 + Google Trends 지수)와 영원히 읽히는 롱테일 키워드(유튜브 통합 조회수 + 블로그 누적 문서)를 이중으로 분석하여, 가장 공격적이고 단단한 수익 파이프라인 밸런스를 구축합니다.
+
+3. **연계 로직 (Synergy Content Engine)**
+   - 점 단위의 정보가 아니라 '선' 단위의 흐름을 짭니다. 여러 작품을 동시에 분석하면 이를 하나로 관통하는 메가 테마를 도출하고, 각각의 개별 문서끼리 내부 링크(Internal Linking) 할 수 있도록 기획부터 **SEO 허브 구조**를 설계하여 체류 시간을 극대화합니다.
 
 ---
 
 ## AutoAuthor 등급 시스템 | Grading System
 
-### 플랫폼별 포화율(Saturation Rate)
+### ⚠️ 중요 주의사항: YouTube API 일일 할당량(Quota) 제한
+
+AutoAuthor의 유튜브 지표 수집(에버그린/트렌디 투 트랙 전략)은 구글 클라우드의 YouTube Data API를 사용합니다.
+- **일일 무료 제공량**: 10,000 할당량(Quota Units)
+- **1키워드 당 소모량**: 200 할당량 (누적 검색 100 + 최근 30일 검색 100)
+- **우회 전략 (Lazy Evaluation)**: 비용 폭탄을 막기 위해 네이버 블로그 검색으로 먼저 포화도를 판별하고 가장 추천할만 한(블루오션인) **상위 5개의 키워드에 대해서만 제한적으로 유튜브 검색을 실행**합니다. (하루 최대 10개 영화 세트 분석 가능)
+- **만약 결과에 유튜브 추천도나 조회수가 하이픈(-) 또는 0으로 나온다면?**:
+  이는 에러가 아니라 **일일 10,000 쿼터 한도를 모두 소진했기 때문**입니다. 당황하지 마시고, 제한이 리셋되는 다음 날 오전(태평양 표준시 자정 기준)에 다시 시도하거나 구글 클라우드 콘솔에서 API Key를 추가 발급받아 환경 변수(`.env`)를 교체하시면 됩니다.
+  나머지 하위 순위 키워드들에 대해서는 조회 자체를 생략하므로 `(조회 생략)` 기호로 표기됩니다.
+
+---
+## 설치 및 설정 (Installation & Setup)
 포화율은 **공급(문서수/영상수)을 수요(검색량/조회수)로 나눈 값**입니다. 이 값이 낮을수록 해당 시장의 기회는 큽니다.
 
 | 등급 | 포화율 | 설명 |

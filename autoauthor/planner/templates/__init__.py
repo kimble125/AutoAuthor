@@ -7,6 +7,8 @@ from .shortform import ShortformTemplate
 from .thread_x import ThreadXTemplate
 from .naver_blog import NaverBlogTemplate
 
+from .synergy import SynergyTemplate
+
 PLATFORM_TEMPLATES = {
     "tistory": TistoryBlogTemplate,
     "naver": NaverBlogTemplate,
@@ -15,4 +17,5 @@ PLATFORM_TEMPLATES = {
     "facebook": FacebookPostTemplate,
     "shortform": ShortformTemplate,
     "thread": ThreadXTemplate,
+    "synergy": SynergyTemplate,
 }

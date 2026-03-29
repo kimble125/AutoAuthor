@@ -70,3 +70,31 @@ class ContentGenerator:
                 results.append({"platform": pf, "error": str(e)})
 
         return results
+    async def generate_synergy_plan(
+        self,
+        titles: list[str],
+        category: str,
+        analyses_by_title: dict,
+        platforms: list[str],
+    ) -> list[dict]:
+        """여러 작품을 묶는 통합 연계 테마 기획안 생성"""
+        from .templates.synergy import SynergyTemplate
+        
+        prompt = SynergyTemplate.generate_prompt(titles, analyses_by_title, category)
+        system = "당신은 멀티 도메인 콘텐츠 전략가입니다. 개별 포스팅들을 관통하는 메가 트렌드 기획안을 작성합니다."
+        
+        response = await self.ai.generate(
+            prompt=prompt,
+            system_prompt=system,
+            temperature=0.7,
+            max_tokens=2048,
+        )
+        
+        return [{
+            "platform": "synergy",
+            "platform_display": "연계 시너지 기획",
+            "title": f"[통합] {len(titles)}개 작품 연계 추천 가이드",
+            "content_type": category,
+            "plan_text": response.text,
+            "ai_model": response.model
+        }]

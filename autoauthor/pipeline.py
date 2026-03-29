@@ -254,103 +254,124 @@ class AutoAuthorPipeline:
 
     # ── 포화도 측정 (멀티 플랫폼: 네이버 + 유튜브) ──
     async def _analyze_keywords(self, keywords: list[str], content_title: str) -> list[dict]:
-        """키워드 포화도 측정 — 네이버/유튜브 병렬 평가
+        """키워드 포화도 측정 — 네이버 기반 1차 필터링 후 유튜브 지연 평가 (Lazy Evaluation)"""
+        from .sources.google_trends import GoogleTrendsSource
+        pt_source = GoogleTrendsSource()
         
-        [Naver] 월간검색량(네이버) + 블로그문서량 → 포화율 → 추천(네이버)
-        [YouTube] 월간검색량(유튜브) + 유튜브영상수 + 평균조회수 → 포화율 → 추천(유튜브)
-        """
-        # ─ 시장규모 측정: 시드 키워드 기준 1회씩 호출
-        naver_market = await self._measure_naver_ad(content_title)
-        yt_market = await self._measure_youtube_market(content_title)
-        print(f"    📊 '{content_title}' 월간검색량(네이버): {naver_market:,}회 | 월간검색량(유튜브): {yt_market:,}회")
+        # ─ 시장규모 및 가중치 측정 (시드 키워드 단위)
+        base_naver_market = await self._measure_naver_ad(content_title)
+        google_trend_weight = await pt_source.get_keyword_recency_score(content_title)
+        
+        total_demand = int(base_naver_market * (1 + (google_trend_weight / 100.0)))
+        print(f"    📊 '{content_title}' 기반수요(네이버): {base_naver_market:,}회 | 구글트렌드가중치: {google_trend_weight}% | 통합수요(가중치): {total_demand:,}회")
 
-        results = []
+        # 1차 평가: 네이버/카카오 문서량 
+        temp_results = []
         for kw in keywords[:30]:
-            # ─ 네이버: 블로그 누적 문서 수
             blog_docs = await self._measure_naver_blog(kw)
-            
-            # ─ 유튜브: 영상 수 + 상위 영상 평균 조회수
-            yt_videos, yt_avg_views = await self._measure_youtube_supply(kw)
-
-            # ─ 카카오/다음: 블로그 누적 문서 수
             kakao_docs = await self.kakao.get_blog_count(kw)
             
-            # ─ 추천(네이버): 포화율 기반 (블로그문서량 ÷ 키워드에 대한 수요지표)
-            if naver_market > 0:
-                naver_ratio = blog_docs / naver_market
-                if naver_ratio <= 0.01:
+            if total_demand > 0:
+                naver_ratio = blog_docs / total_demand
+                if naver_ratio <= 0.005:
                     naver_stars = "★★★"
-                elif naver_ratio <= 0.1:
+                elif naver_ratio <= 0.02:
                     naver_stars = "★★"
                 else:
                     naver_stars = "★"
             else:
-                # 시장규모 미확인 → 문서량만으로 판단
-                if blog_docs <= 1000:
+                if blog_docs <= 200:
                     naver_stars = "★★★"
-                elif blog_docs <= 10000:
+                elif blog_docs <= 1000:
                     naver_stars = "★★"
                 else:
                     naver_stars = "★"
-            
-            # ─ 추천(유튜브): 영상수 적고 + 평균조회수 높을 때 황금
-            if yt_avg_views > 0 and yt_videos > 0:
-                yt_ratio = yt_videos / max(1, yt_avg_views)
-                if yt_ratio <= 0.01 and yt_avg_views >= 10000:
-                    yt_stars = "★★★"
-                elif yt_ratio <= 0.1 and yt_avg_views >= 1000:
-                    yt_stars = "★★"
-                else:
-                    yt_stars = "★"
-            else:
-                yt_stars = "-"
 
-            # ─ 추천(다음): 포화율 기반 (다음 블로그문서량 ÷ 네이버 수요지표 프록시)
-            if naver_market > 0:
-                kakao_ratio = kakao_docs / naver_market
-                if kakao_ratio <= 0.01:
+            if total_demand > 0:
+                kakao_ratio = kakao_docs / total_demand
+                if kakao_ratio <= 0.002:
                     kakao_stars = "★★★"
-                elif kakao_ratio <= 0.1:
+                elif kakao_ratio <= 0.01:
                     kakao_stars = "★★"
                 else:
                     kakao_stars = "★"
             else:
-                if kakao_docs <= 500:
+                if kakao_docs <= 100:
                     kakao_stars = "★★★"
-                elif kakao_docs <= 5000:
+                elif kakao_docs <= 500:
                     kakao_stars = "★★"
                 else:
                     kakao_stars = "★"
 
-            results.append({
+            temp_results.append({
                 "keyword": kw,
                 "intent": self._classify_intent(kw),
-                # 네이버
-                "naver_market": naver_market,
-                "blog_docs": blog_docs,
+                "google_trend_pct": google_trend_weight,
+                "total_demand": total_demand,
+                "naver_docs": blog_docs,
                 "naver_stars": naver_stars,
-                # 유튜브
-                "yt_market": yt_market,
-                "yt_videos": yt_videos,
-                "yt_avg_views": yt_avg_views,
-                "yt_stars": yt_stars,
-                # 카카오
                 "kakao_docs": kakao_docs,
                 "kakao_stars": kakao_stars,
-                # DB 호환용
-                "market_size": naver_market,
-                "supply_raw": blog_docs,
-                "demand_raw": naver_market,
-                "blog_competition": blog_docs,
-                "stars": naver_stars,
-                "score": min(100, int(naver_market / 1000)),
-                "saturation_grade": "blue" if naver_stars == "★★★" else ("purple" if naver_stars == "★★" else "red"),
-                "is_golden": naver_stars == "★★★",
             })
+            import asyncio
             await asyncio.sleep(self.config.request_delay)
 
-        results.sort(key=lambda x: x["blog_docs"])
-        return results
+        # 1차 정렬 (블로그 문서량 기준 오름차순 - 가장 블루오션인 키워드 우선)
+        temp_results.sort(key=lambda x: x["naver_docs"])
+
+        # 2차 평가: 상위 5개 키워드만 유튜브 데이터 수집 (Lazy Evaluation)
+        MAX_YOUTUBE_QUERIES = 5
+        quota_exceeded = False
+        
+        for i, res in enumerate(temp_results):
+            if i < MAX_YOUTUBE_QUERIES and not quota_exceeded:
+                yt_data = await self._measure_youtube_metrics(res["keyword"])
+                
+                if yt_data.get("quota_exceeded"):
+                    quota_exceeded = True
+                    yt_stars = "- (할당량 초과)"
+                    recent_vids = 0
+                else:
+                    recent_vids = yt_data.get("recent_videos", 0)
+                    if total_demand > 0:
+                        yt_ratio = recent_vids / max(1, (total_demand / 1000.0))
+                        if yt_ratio <= 0.5:
+                            yt_stars = "★★★"
+                        elif yt_ratio <= 1.5:
+                            yt_stars = "★★"
+                        else:
+                            yt_stars = "★"
+                    else:
+                        if recent_vids <= 3:
+                            yt_stars = "★★★"
+                        elif recent_vids <= 10:
+                            yt_stars = "★★"
+                        else:
+                            yt_stars = "★"
+                            
+                res.update({
+                    "yt_total_videos": yt_data.get("total_videos", 0),
+                    "yt_total_avg_views": yt_data.get("total_avg_views", 0),
+                    "yt_recent_videos": recent_vids,
+                    "yt_recent_avg_views": yt_data.get("recent_avg_views", 0),
+                    "yt_stars": yt_stars,
+                    "is_golden": res["naver_stars"] == "★★★" or yt_stars == "★★★"
+                })
+                # 유튜브 API 딜레이 추가
+                import asyncio
+                await asyncio.sleep(self.config.request_delay)
+            else:
+                # 할당량 초과 또는 상위 5위 밖 키워드는 스킵
+                res.update({
+                    "yt_total_videos": 0,
+                    "yt_total_avg_views": 0,
+                    "yt_recent_videos": 0,
+                    "yt_recent_avg_views": 0,
+                    "yt_stars": "- (조회 생략)" if not quota_exceeded else "- (할당량 초과)",
+                    "is_golden": res["naver_stars"] == "★★★"
+                })
+
+        return temp_results
 
     async def _measure_naver_ad(self, keyword: str) -> int:
         """네이버 검색광고 API — 시드 키워드의 PC+Mobile 월간 검색량 반환"""
@@ -447,50 +468,67 @@ class AutoAuthorPipeline:
         except Exception:
             return 0
 
-    async def _measure_youtube_supply(self, keyword: str) -> tuple:
-        """유튜브 키워드별 공급 측정 — (영상 수, 상위 5개 평균 조회수) 반환"""
+    async def _measure_youtube_metrics(self, keyword: str) -> dict:
+        """유튜브 투-트랙 지표 동시 수집 (에버그린 / 트렌디 30일)"""
         import aiohttp
+        from datetime import datetime, timedelta, timezone
         yt_key = getattr(self.config, "youtube_api_key", "")
         if not yt_key:
-            return (0, 0)
+            return {"total_videos": 0, "total_avg_views": 0, "recent_videos": 0, "recent_avg_views": 0}
         
-        try:
-            search_url = "https://www.googleapis.com/youtube/v3/search"
-            params = {
-                "part": "id", "q": keyword, "type": "video",
-                "regionCode": "KR", "maxResults": 5, "key": yt_key
-            }
-            async with aiohttp.ClientSession() as s:
-                async with s.get(search_url, params=params,
-                                 timeout=aiohttp.ClientTimeout(total=10)) as r:
+        async def fetch_metrics(session, params):
+            try:
+                search_url = "https://www.googleapis.com/youtube/v3/search"
+                async with session.get(search_url, params=params, timeout=aiohttp.ClientTimeout(total=8)) as r:
                     if r.status != 200:
-                        return (0, 0)
+                        if r.status == 403:
+                            print("    ❌ YouTube API 할당량(Quota) 초과! (이후 유튜브 지표는 0으로 처리됩니다)")
+                            return -1, -1
+                        return 0, 0
                     data = await r.json()
-                    total_results = data.get("pageInfo", {}).get("totalResults", 0)
-                    video_ids = [item["id"]["videoId"] for item in data.get("items", [])
-                                 if item.get("id", {}).get("videoId")]
+                    total_res = data.get("pageInfo", {}).get("totalResults", 0)
+                    video_ids = [item["id"]["videoId"] for item in data.get("items", []) if item.get("id", {}).get("videoId")]
                     if not video_ids:
-                        return (total_results, 0)
-
+                        return total_res, 0
+                
                 stats_url = "https://www.googleapis.com/youtube/v3/videos"
-                stats_params = {
-                    "part": "statistics", "id": ",".join(video_ids), "key": yt_key
-                }
-                async with s.get(stats_url, params=stats_params,
-                                 timeout=aiohttp.ClientTimeout(total=10)) as r2:
+                stats_params = {"part": "statistics", "id": ",".join(video_ids), "key": yt_key}
+                async with session.get(stats_url, params=stats_params, timeout=aiohttp.ClientTimeout(total=8)) as r2:
                     if r2.status != 200:
-                        return (total_results, 0)
+                        return total_res, 0
                     stats_data = await r2.json()
-                    views = []
-                    for item in stats_data.get("items", []):
-                        vc = item.get("statistics", {}).get("viewCount", "0")
-                        views.append(int(vc))
+                    views = [int(item.get("statistics", {}).get("viewCount", "0")) for item in stats_data.get("items", [])]
                     avg_views = int(sum(views) / len(views)) if views else 0
-                    return (total_results, avg_views)
-        except Exception:
-            return (0, 0)
+                    return total_res, avg_views
+            except Exception:
+                return 0, 0
 
-    # ── 통합 CSV 내보내기 ──
+        try:
+            async with aiohttp.ClientSession() as s:
+                # 1. Total (Evergreen)
+                params_total = {"part": "id", "q": keyword, "type": "video", "regionCode": "KR", "maxResults": 5, "key": yt_key}
+                
+                # 2. Recent 30 days (Trendy)
+                thirty_days_ago = (datetime.now(timezone.utc) - timedelta(days=30)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+                params_recent = {"part": "id", "q": keyword, "type": "video", "regionCode": "KR", "maxResults": 5, "publishedAfter": thirty_days_ago, "order": "relevance", "key": yt_key}
+                
+                total_res, ts_res = await asyncio.gather(
+                    fetch_metrics(s, params_total),
+                    fetch_metrics(s, params_recent)
+                )
+                
+                if total_res[0] == -1 or ts_res[0] == -1:
+                    return {"quota_exceeded": True}
+                
+                return {
+                    "total_videos": total_res[0],
+                    "total_avg_views": total_res[1],
+                    "recent_videos": ts_res[0],
+                    "recent_avg_views": ts_res[1],
+                }
+        except Exception as e:
+            return {"total_videos": 0, "total_avg_views": 0, "recent_videos": 0, "recent_avg_views": 0}
+
     def _export_unified_csv(self, analyses_by_title: dict, mode: str = "autopilot"):
         import pandas as pd
         import os
@@ -499,18 +537,19 @@ class AutoAuthorPipeline:
         for t, analyses in analyses_by_title.items():
             for a in analyses:
                 rows.append({
-                    "콘텐츠명": t,
-                    "월간검색량(네이버)": a["naver_market"],
-                    "월간검색량(유튜브)": a["yt_market"],
-                    "키워드": a["keyword"],
-                    "검색의도": a.get("intent", ""),
-                    "블로그문서량": a["blog_docs"],
-                    "추천(네이버)": a["naver_stars"],
-                    "유튜브영상수": a["yt_videos"],
-                    "평균조회수(유튜브)": a["yt_avg_views"],
-                    "추천(유튜브)": a["yt_stars"],
-                    "다음문서량": a["kakao_docs"],
-                    "추천(다음)": a["kakao_stars"],
+                    "콘텐츠명(주제)": t,
+                    "구글_트렌드(%)": a["google_trend_pct"],
+                    "통합검색수요(전체)": a["total_demand"],
+                    "하위_키워드": a["keyword"],
+                    "총문서량(네이버)": a["naver_docs"],
+                    "추천도(네이버)": a["naver_stars"],
+                    "총문서량(다음)": a["kakao_docs"],
+                    "추천도(티스토리)": a["kakao_stars"],
+                    "총영상수(유튜브)": a["yt_total_videos"],
+                    "평균조회수(유튜브)": a["yt_total_avg_views"],
+                    "최근30일_영상수(유튜브)": a["yt_recent_videos"],
+                    "최근30일_조회수(유튜브)": a["yt_recent_avg_views"],
+                    "추천도(유튜브)": a["yt_stars"],
                 })
         if rows:
             os.makedirs("results", exist_ok=True)
@@ -520,6 +559,34 @@ class AutoAuthorPipeline:
             print(f"  💾 통합 CSV 저장 완료: {csv_path}")
             return csv_path
         return None
+
+    def _export_plans(self, plans: list[dict], mode: str = "autopilot"):
+        import os
+        import re
+        from datetime import datetime
+        os.makedirs("results", exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        saved_files = []
+        
+        for plan in plans:
+            if "error" in plan or not plan.get("plan_text"):
+                continue
+            
+            title_safe = re.sub(r'[^\w가-힣]', '_', plan["title"])
+            platform = plan["platform"]
+            filename = f"results/기획안_{title_safe}_{platform}_{timestamp}.md"
+            
+            with open(filename, "w", encoding="utf-8") as f:
+                f.write(f"# [{plan.get('platform_display', platform)}] {plan['title']}\n")
+                f.write(f"- 생성일: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n")
+                f.write(f"- AI 모델: {plan.get('ai_model', 'N/A')}\n\n")
+                f.write(plan["plan_text"])
+            
+            saved_files.append(filename)
+            
+        if saved_files:
+            print(f"  💾 기획안 파일 {len(saved_files)}개 저장 완료 (results/)")
+        return saved_files
 
     async def _measure_naver_blog(self, keyword: str) -> int:
         """네이버 블로그 문서량 절대수치 반환 (OpenAPI 우선, 실패 시 스크래핑)"""
@@ -583,23 +650,78 @@ async def _cli_main():
     parser.add_argument("--category", default="movie")
     parser.add_argument("--top", type=int, default=3)
     parser.add_argument("--platforms", default="tistory", help="콤마 구분: tistory,naver,youtube,instagram,facebook,shortform,thread")
+    parser.add_argument("--titles", help="수동 분석할 타이틀 목록 (콤마 구분, 예: '마션,인터스텔라')")
     args = parser.parse_args()
 
     platforms = [p.strip() for p in args.platforms.split(",")]
     pipeline = AutoAuthorPipeline()
 
-    if args.mode == "copilot":
+    if args.titles:
+        titles = [t.strip() for t in args.titles.split(",")]
+        # 수동 타이틀 지정 시 트렌드 탐지를 스킵하고 바로 3단계 파이프라인 수행
+        print("\n" + "=" * 60)
+        print("  🚀 AutoAuthor 수동 지정 키워드 분석 모드")
+        print(f"  타겟 시드: {titles}")
+        print("=" * 60)
+        
+        from .pipeline import PipelineResult
+        import time
+        result = PipelineResult(mode="manual_test")
+        start = time.time()
+        
+        for title in titles:
+            try:
+                kws = await pipeline.detector.discover_keywords(title)
+                result.keywords_by_title[title] = kws
+            except Exception as e:
+                result.errors.append(f"키워드 수집 실패 ({title}): {e}")
+
+        for title, kws in result.keywords_by_title.items():
+            if kws:
+                analyses = await pipeline._analyze_keywords(kws, title)
+                result.analyses_by_title[title] = analyses
+
+        for title, analyses in result.analyses_by_title.items():
+            if analyses:
+                plans = await pipeline.generator.generate_multi_platform(title, args.category, analyses, platforms)
+                result.plans.extend(plans)
+        
+        # 연계 콘텐츠(Synergy) 기획 추가 (여러 작품일 경우)
+        if len(titles) >= 2:
+            print(f"\n🔗 [Synergy] {len(titles)}개 작품 연계 기획안 생성 중...")
+            try:
+                synergy_plans = await pipeline.generator.generate_synergy_plan(
+                    titles=titles,
+                    category=args.category,
+                    analyses_by_title=result.analyses_by_title,
+                    platforms=platforms
+                )
+                result.plans.extend(synergy_plans)
+            except Exception as e:
+                print(f"  ⚠️ 연계 기획안 생성 실패: {e}")
+
+        if result.plans:
+            pipeline._export_plans(result.plans, "수동분석")
+            
+        if result.analyses_by_title:
+            pipeline._export_unified_csv(result.analyses_by_title, "수동분석")
+        
+    elif args.mode == "copilot":
         result = await pipeline.run_copilot(args.category, platforms)
+        if result.plans:
+            pipeline._export_plans(result.plans, "copilot")
     else:
         result = await pipeline.run_autopilot(args.category, args.top, platforms)
+        if result.plans:
+            pipeline._export_plans(result.plans, "autopilot")
 
     # 기획안 출력
     for plan in result.plans:
         if "error" in plan:
             continue
         print(f"\n{'='*60}")
-        print(f"  📝 [{plan['platform_display']}] {plan['title']}")
-        print(f"  🤖 Model: {plan['ai_model']}")
+        print(f"  📝 [{plan.get('platform_display', plan['platform'])}] {plan['title']}")
+        print(f"  🤖 Model: {plan.get('ai_model', 'N/A')}")
         print(f"{'='*60}")
         print(plan["plan_text"][:2000])
         if len(plan["plan_text"]) > 2000:

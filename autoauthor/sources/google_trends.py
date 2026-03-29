@@ -90,7 +90,7 @@ class GoogleTrendsSource(BaseTrendSource):
         return list(dict.fromkeys(keywords))
 
     async def get_interest_over_time(self, keywords: list[str]) -> dict:
-        """여러 키워드의 검색량 추이 비교"""
+        """여러 키워드의 검색량 추이 비교 (상대 비교)"""
         try:
             pt = self._get_client()
             await asyncio.to_thread(pt.build_payload, keywords[:5], geo='KR', timeframe='today 3-m')
@@ -100,3 +100,32 @@ class GoogleTrendsSource(BaseTrendSource):
             return {col: df[col].tolist() for col in df.columns if col != 'isPartial'}
         except Exception:
             return {}
+
+    async def get_keyword_recency_score(self, keyword: str) -> int:
+        """단일 키워드의 최근 30일 대비 현재 화제성 가중치 추출 (0~100)
+        개별 키워드의 30일 간 자체 최대 검색량을 100으로 두고, 가장 최근 3일의 평균 점수를 반환함.
+        """
+        try:
+            pt = self._get_client()
+            import time
+            for attempt in range(2):
+                try:
+                    await asyncio.to_thread(pt.build_payload, [keyword], geo='KR', timeframe='today 1-m')
+                    df = await asyncio.to_thread(pt.interest_over_time)
+                    if df.empty or keyword not in df.columns:
+                        return 0
+                        
+                    # 마지막 3개 데이터(주로 최근 3일)의 평균값
+                    recent_data = df[keyword].tail(3)
+                    if len(recent_data) > 0:
+                        score = int(recent_data.mean())
+                        return max(0, min(100, score))
+                    return 0
+                except Exception as e:
+                    if '429' in str(e):
+                        time.sleep(2)
+                        continue
+                    break
+        except Exception:
+            pass
+        return 0
