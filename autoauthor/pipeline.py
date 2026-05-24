@@ -12,7 +12,7 @@ from .trend_detector import TrendDetector, TrendReport
 from .sources import (
     NaverDataLabSource, GoogleTrendsSource, TMDBSource,
     GoogleNewsSource, GoogleSuggestSource, WatchaPediaSource,
-    KakaoSource, BaseTrendSource,
+    KakaoSource, BaseTrendSource, NaverSuggestSource
 )
 from .ai.engine_chain import create_default_chain
 from .planner.content_generator import ContentGenerator
@@ -37,6 +37,18 @@ class PipelineResult:
 
 
 class AutoAuthorPipeline:
+    NAVER_GOLDEN_RATIO = 0.005
+    NAVER_PROMISING_RATIO = 0.02
+    KAKAO_GOLDEN_RATIO = 0.002
+    KAKAO_PROMISING_RATIO = 0.01
+    YOUTUBE_GOLDEN_RATIO = 0.5
+    YOUTUBE_PROMISING_RATIO = 1.5
+    MAX_ANALYSIS_KEYWORDS = 30
+    MAX_DIRECT_DEMAND_QUERIES = 12
+    MAX_YOUTUBE_QUERIES = 5
+    REQUIRE_DIRECT_DEMAND_FOR_GOLDEN = True
+    MIN_KEYWORD_DEMAND_FOR_GOLDEN = 100
+
     def __init__(self, config: Optional[AutoAuthorConfig] = None):
         self.config = config or load_config()
         self._detector: Optional[TrendDetector] = None
@@ -54,6 +66,7 @@ class AutoAuthorPipeline:
             sources.append(TMDBSource(cfg.tmdb_api_key, cfg.tmdb_read_access_token))
         sources.append(GoogleNewsSource())
         sources.append(GoogleSuggestSource())
+        sources.append(NaverSuggestSource())
         if cfg.enable_watcha_pedia:
             sources.append(WatchaPediaSource())
         return sources
@@ -149,6 +162,18 @@ class AutoAuthorPipeline:
             except Exception as e:
                 result.errors.append(f"기획안 생성 실패 ({title}): {e}")
 
+        if "synergy" in platforms and len(result.analyses_by_title) >= 2:
+            try:
+                synergy_plans = await self.generator.generate_synergy_plan(
+                    titles=list(result.analyses_by_title.keys()),
+                    category=category,
+                    analyses_by_title=result.analyses_by_title,
+                    platforms=platforms,
+                )
+                result.plans.extend(synergy_plans)
+            except Exception as e:
+                result.errors.append(f"연계 기획안 생성 실패: {e}")
+
         result.duration_seconds = round(time.time() - start, 1)
 
         # ── V6 단일 통합 CSV 추출 로직 (웹 대시보드 연동용) ──
@@ -243,6 +268,15 @@ class AutoAuthorPipeline:
                 title, category, analyses, platforms)
             result.plans.extend(plans)
 
+        if "synergy" in platforms and len(result.analyses_by_title) >= 2:
+            synergy_plans = await self.generator.generate_synergy_plan(
+                titles=list(result.analyses_by_title.keys()),
+                category=category,
+                analyses_by_title=result.analyses_by_title,
+                platforms=platforms,
+            )
+            result.plans.extend(synergy_plans)
+
         result.duration_seconds = round(time.time() - start, 1)
 
         # ── V6 단일 통합 CSV 추출 로직 (웹 대시보드 연동용) ──
@@ -253,88 +287,386 @@ class AutoAuthorPipeline:
         return result
 
     # ── 포화도 측정 (멀티 플랫폼: 네이버 + 유튜브) ──
+    @staticmethod
+    def _metric(value: int = 0, status: str = "ok", reason: str = "") -> dict:
+        return {"value": value, "status": status, "reason": reason}
+
+    @staticmethod
+    def _grade_ratio(value: int, demand: int, status: str, golden_limit: float, promising_limit: float) -> tuple[str, Optional[float]]:
+        if status != "ok" or value < 0 or demand <= 0:
+            return "-", None
+        ratio = value / max(demand, 1)
+        if ratio <= golden_limit:
+            return "★★★", ratio
+        if ratio <= promising_limit:
+            return "★★", ratio
+        return "★", ratio
+
+    @staticmethod
+    def _score_ratio(ratio: Optional[float], golden_limit: float, promising_limit: float) -> float:
+        if ratio is None:
+            return 0.0
+        if ratio <= golden_limit:
+            return round(80 + ((golden_limit - ratio) / max(golden_limit, 0.000001)) * 20, 1)
+        if ratio <= promising_limit:
+            span = max(promising_limit - golden_limit, 0.000001)
+            return round(50 + ((promising_limit - ratio) / span) * 30, 1)
+        penalty = min(50, ((ratio - promising_limit) / max(promising_limit, 0.000001)) * 50)
+        return round(max(0, 50 - penalty), 1)
+
+    @staticmethod
+    def _best_platform_score(*scores: float) -> float:
+        return round(max(scores or [0.0]), 1)
+
+    @staticmethod
+    def _status_label(status: str) -> str:
+        labels = {
+            "ok": "측정완료",
+            "missing_key": "API키 없음",
+            "quota_exceeded": "쿼터초과",
+            "no_demand": "수요 0",
+            "no_data": "데이터 없음",
+            "error": "측정실패",
+            "skipped": "조회 생략",
+            "related_only": "정확일치 없음",
+        }
+        return labels.get(status, status)
+
+    @staticmethod
+    def _demand_basis_label(basis: str) -> str:
+        labels = {
+            "keyword_direct": "키워드 직접수요",
+            "keyword_direct_zero": "키워드 직접수요 0",
+            "keyword_direct_unverified": "직접수요 미검증",
+            "topic_fallback": "주제 수요 대체",
+            "topic_fallback_unverified": "주제 수요 대체(직접 미조회)",
+            "no_demand": "수요 없음",
+        }
+        return labels.get(basis, basis)
+
+    @staticmethod
+    def _trend_adjusted_demand(demand: int, google_trend_weight: int) -> int:
+        if demand <= 0:
+            return 0
+        return int(demand * (1 + (google_trend_weight / 100.0)))
+
+    @staticmethod
+    def _ratio_to_percent(ratio: Optional[float]) -> Optional[float]:
+        if ratio is None:
+            return None
+        return round(ratio * 100, 2)
+
+    @staticmethod
+    def _round_metric(value: Optional[float], digits: int = 2) -> Optional[float]:
+        if value is None:
+            return None
+        return round(value, digits)
+
+    @staticmethod
+    def _normalize_keyword(text: str) -> str:
+        import re
+        return re.sub(r"[^가-힣a-zA-Z0-9]", "", text).lower()
+
+    def _keyword_relevance(self, keyword: str, content_title: str) -> tuple[int, str]:
+        norm_kw = self._normalize_keyword(keyword)
+        norm_title = self._normalize_keyword(content_title)
+        if not norm_kw or not norm_title:
+            return 0, "empty"
+        if norm_title in norm_kw:
+            return 100, "title_match"
+
+        title_tokens = [
+            self._normalize_keyword(token)
+            for token in content_title.replace("-", " ").split()
+            if len(self._normalize_keyword(token)) >= 2
+        ]
+        if title_tokens and any(token in norm_kw for token in title_tokens):
+            return 70, "partial_title_match"
+
+        # 자동 메타데이터 소스가 만든 일반 인명/장르 키워드는 황금 승격에서 제외한다.
+        return 20, "weak_or_metadata_only"
+
+    def _confidence_score(
+        self,
+        demand_status: str,
+        total_demand: int,
+        naver_status: str,
+        kakao_status: str,
+        yt_status: str,
+        google_trend_weight: int,
+        demand_basis: str = "topic_fallback",
+    ) -> int:
+        score = 0
+        if demand_status == "ok" and total_demand > 0:
+            score += 25
+        if demand_basis == "keyword_direct":
+            score += 15
+        if naver_status == "ok":
+            score += 25
+        if kakao_status == "ok":
+            score += 15
+        if yt_status == "ok":
+            score += 20
+        if google_trend_weight > 0:
+            score += 5
+        return min(100, score)
+
+    def _apply_demand_basis(
+        self,
+        result: dict,
+        demand: int,
+        demand_status: str,
+        demand_basis: str,
+        google_trend_weight: int,
+    ) -> None:
+        adjusted_demand = self._trend_adjusted_demand(demand, google_trend_weight)
+        if adjusted_demand <= 0:
+            demand_status = "no_demand"
+
+        naver_stars, naver_ratio = self._grade_ratio(
+            result["naver_docs"], adjusted_demand, result["naver_status"],
+            self.NAVER_GOLDEN_RATIO, self.NAVER_PROMISING_RATIO
+        )
+        kakao_stars, kakao_ratio = self._grade_ratio(
+            result["kakao_docs"], adjusted_demand, result["kakao_status"],
+            self.KAKAO_GOLDEN_RATIO, self.KAKAO_PROMISING_RATIO
+        )
+        naver_score = self._score_ratio(naver_ratio, self.NAVER_GOLDEN_RATIO, self.NAVER_PROMISING_RATIO)
+        kakao_score = self._score_ratio(kakao_ratio, self.KAKAO_GOLDEN_RATIO, self.KAKAO_PROMISING_RATIO)
+
+        result.update({
+            "analysis_demand": adjusted_demand,
+            "total_demand": adjusted_demand,
+            "demand_status": demand_status,
+            "demand_basis": demand_basis,
+            "naver_ratio": naver_ratio,
+            "naver_stars": naver_stars,
+            "kakao_ratio": kakao_ratio,
+            "kakao_stars": kakao_stars,
+            "score": self._best_platform_score(naver_score, kakao_score),
+            "confidence": self._confidence_score(
+                demand_status, adjusted_demand,
+                result["naver_status"], result["kakao_status"], "skipped",
+                google_trend_weight, demand_basis
+            ),
+        })
+
+    def _has_verified_direct_demand(self, result: dict) -> bool:
+        return (
+            result.get("demand_basis") == "keyword_direct"
+            and result.get("keyword_demand", 0) > 0
+            and result.get("keyword_demand_status") == "ok"
+        )
+
+    def _meets_min_direct_demand(self, result: dict) -> bool:
+        return result.get("keyword_demand", 0) >= self.MIN_KEYWORD_DEMAND_FOR_GOLDEN
+
+    def _build_golden_reasons(self, result: dict, yt_status: str, yt_stars: str) -> list[str]:
+        reasons = []
+        if result.get("analysis_demand", 0) <= 0:
+            reasons.append("키워드 직접수요 없음/미확인")
+        elif self.REQUIRE_DIRECT_DEMAND_FOR_GOLDEN and not self._has_verified_direct_demand(result):
+            reasons.append("키워드별 직접수요 미검증")
+        elif not self._meets_min_direct_demand(result):
+            reasons.append(f"키워드 직접수요 {self.MIN_KEYWORD_DEMAND_FOR_GOLDEN}회 미만")
+        elif result["relevance_score"] < 50:
+            reasons.append("주제 관련도 낮음")
+        else:
+            if result["naver_status"] == "ok" and result["naver_stars"] == "★★★":
+                reasons.append("네이버 직접수요 대비 문서량 낮음")
+            if yt_status == "ok" and yt_stars == "★★★":
+                reasons.append("유튜브 최근 공급 낮음")
+        if not reasons:
+            reasons.append("황금 기준 미충족")
+        return reasons
+
+    def _is_golden_candidate(self, result: dict, yt_status: str = "skipped", yt_stars: str = "-") -> bool:
+        direct_ok = (not self.REQUIRE_DIRECT_DEMAND_FOR_GOLDEN) or self._has_verified_direct_demand(result)
+        return (
+            result.get("analysis_demand", 0) > 0
+            and direct_ok
+            and self._meets_min_direct_demand(result)
+            and result["relevance_score"] >= 50
+            and (
+                (result["naver_status"] == "ok" and result["naver_stars"] == "★★★")
+                or (yt_status == "ok" and yt_stars == "★★★")
+            )
+        )
+
+    def _apply_score_gates(self, result: dict) -> None:
+        cap = None
+        if result.get("relevance_score", 0) < 50:
+            cap = 30
+        elif result.get("analysis_demand", 0) <= 0:
+            cap = 20
+        elif self.REQUIRE_DIRECT_DEMAND_FOR_GOLDEN and not self._has_verified_direct_demand(result):
+            cap = 40
+        elif not self._meets_min_direct_demand(result):
+            cap = 45
+
+        if cap is not None:
+            result["score"] = round(min(result.get("score", 0), cap), 1)
+
+    def _verdict_label(self, result: dict) -> str:
+        if result.get("is_golden"):
+            return "공략 우선"
+        if result.get("relevance_score", 0) < 50:
+            return "제외: 주제 관련도 낮음"
+        if result.get("analysis_demand", 0) <= 0:
+            return "보류: 키워드 직접수요 없음"
+        if self.REQUIRE_DIRECT_DEMAND_FOR_GOLDEN and not self._has_verified_direct_demand(result):
+            return "보류: 직접수요 미검증"
+        if not self._meets_min_direct_demand(result):
+            return "보류: 직접수요 기준 미달"
+        if result.get("score", 0) >= 50:
+            return "후보: 추가 검토"
+        return "제외: 포화도 높음"
+
     async def _analyze_keywords(self, keywords: list[str], content_title: str) -> list[dict]:
         """키워드 포화도 측정 — 네이버 기반 1차 필터링 후 유튜브 지연 평가 (Lazy Evaluation)"""
         from .sources.google_trends import GoogleTrendsSource
         pt_source = GoogleTrendsSource()
         
         # ─ 시장규모 및 가중치 측정 (시드 키워드 단위)
-        base_naver_market = await self._measure_naver_ad(content_title)
+        market = await self._measure_naver_ad_metrics(content_title)
+        topic_naver_demand = market["value"]
         google_trend_weight = await pt_source.get_keyword_recency_score(content_title)
         
-        total_demand = int(base_naver_market * (1 + (google_trend_weight / 100.0)))
-        print(f"    📊 '{content_title}' 기반수요(네이버): {base_naver_market:,}회 | 구글트렌드가중치: {google_trend_weight}% | 통합수요(가중치): {total_demand:,}회")
+        topic_total_demand = self._trend_adjusted_demand(topic_naver_demand, google_trend_weight)
+        topic_demand_status = market["status"] if topic_total_demand > 0 else "no_demand"
+        print(f"    📊 '{content_title}' 주제수요(네이버): {topic_naver_demand:,}회 | 구글트렌드 최근관심도: {google_trend_weight}/100 | 주제기반 통합수요: {topic_total_demand:,}회")
 
         # 1차 평가: 네이버/카카오 문서량 
         temp_results = []
-        for kw in keywords[:30]:
-            blog_docs = await self._measure_naver_blog(kw)
-            kakao_docs = await self.kakao.get_blog_count(kw)
-            
-            if total_demand > 0:
-                naver_ratio = blog_docs / total_demand
-                if naver_ratio <= 0.005:
-                    naver_stars = "★★★"
-                elif naver_ratio <= 0.02:
-                    naver_stars = "★★"
-                else:
-                    naver_stars = "★"
-            else:
-                if blog_docs <= 200:
-                    naver_stars = "★★★"
-                elif blog_docs <= 1000:
-                    naver_stars = "★★"
-                else:
-                    naver_stars = "★"
-
-            if total_demand > 0:
-                kakao_ratio = kakao_docs / total_demand
-                if kakao_ratio <= 0.002:
-                    kakao_stars = "★★★"
-                elif kakao_ratio <= 0.01:
-                    kakao_stars = "★★"
-                else:
-                    kakao_stars = "★"
-            else:
-                if kakao_docs <= 100:
-                    kakao_stars = "★★★"
-                elif kakao_docs <= 500:
-                    kakao_stars = "★★"
-                else:
-                    kakao_stars = "★"
+        for kw in list(dict.fromkeys(k.strip() for k in keywords if k and k.strip()))[:self.MAX_ANALYSIS_KEYWORDS]:
+            relevance_score, relevance_status = self._keyword_relevance(kw, content_title)
+            naver_metric = await self._measure_naver_blog_metrics(kw)
+            kakao_metric = await self._measure_kakao_blog_metrics(kw)
+            blog_docs = naver_metric["value"]
+            kakao_docs = kakao_metric["value"]
+            naver_stars, naver_ratio = self._grade_ratio(
+                blog_docs, topic_total_demand, naver_metric["status"],
+                self.NAVER_GOLDEN_RATIO, self.NAVER_PROMISING_RATIO
+            )
+            kakao_stars, kakao_ratio = self._grade_ratio(
+                kakao_docs, topic_total_demand, kakao_metric["status"],
+                self.KAKAO_GOLDEN_RATIO, self.KAKAO_PROMISING_RATIO
+            )
+            naver_score = self._score_ratio(naver_ratio, self.NAVER_GOLDEN_RATIO, self.NAVER_PROMISING_RATIO)
+            kakao_score = self._score_ratio(kakao_ratio, self.KAKAO_GOLDEN_RATIO, self.KAKAO_PROMISING_RATIO)
 
             temp_results.append({
                 "keyword": kw,
                 "intent": self._classify_intent(kw),
+                "relevance_score": relevance_score,
+                "relevance_status": relevance_status,
                 "google_trend_pct": google_trend_weight,
-                "total_demand": total_demand,
+                "topic_demand": topic_naver_demand,
+                "topic_total_demand": topic_total_demand,
+                "keyword_demand": None,
+                "keyword_demand_adjusted": None,
+                "keyword_demand_status": "skipped",
+                "keyword_demand_match": "",
+                "analysis_demand": topic_total_demand,
+                "total_demand": topic_total_demand,
+                "demand_status": topic_demand_status,
+                "demand_basis": "topic_fallback_unverified",
                 "naver_docs": blog_docs,
+                "naver_status": naver_metric["status"],
+                "naver_ratio": naver_ratio,
                 "naver_stars": naver_stars,
                 "kakao_docs": kakao_docs,
+                "kakao_status": kakao_metric["status"],
+                "kakao_ratio": kakao_ratio,
                 "kakao_stars": kakao_stars,
+                "score": self._best_platform_score(naver_score, kakao_score),
+                "confidence": self._confidence_score(
+                    topic_demand_status, topic_total_demand,
+                    naver_metric["status"], kakao_metric["status"], "skipped",
+                    google_trend_weight, "topic_fallback_unverified"
+                ),
+                "golden_reason": "",
             })
             import asyncio
             await asyncio.sleep(self.config.request_delay)
 
-        # 1차 정렬 (블로그 문서량 기준 오름차순 - 가장 블루오션인 키워드 우선)
-        temp_results.sort(key=lambda x: x["naver_docs"])
+        # 1차 정렬: 측정 실패는 뒤로 보내고, 수요 대비 공급이 낮은 키워드를 우선 평가
+        temp_results.sort(key=lambda x: (
+            x["relevance_score"] < 50,
+            x["naver_ratio"] is None,
+            x["naver_ratio"] if x["naver_ratio"] is not None else float("inf"),
+            x["naver_docs"] if x["naver_docs"] >= 0 else float("inf"),
+        ))
 
-        # 2차 평가: 상위 5개 키워드만 유튜브 데이터 수집 (Lazy Evaluation)
-        MAX_YOUTUBE_QUERIES = 5
+        # 2차 평가: 상위 후보만 키워드별 네이버 검색광고 수요를 직접 확인한다.
+        for i, res in enumerate(temp_results):
+            if i < self.MAX_DIRECT_DEMAND_QUERIES:
+                direct_metric = await self._measure_naver_ad_metrics(res["keyword"])
+                direct_value = direct_metric["value"]
+                match_type = direct_metric.get("match_type", "")
+                matched_keyword = direct_metric.get("matched_keyword", "")
+
+                if direct_metric["status"] == "ok" and match_type == "exact" and direct_value > 0:
+                    demand_basis = "keyword_direct"
+                    demand_status = "ok"
+                    keyword_status = "ok"
+                    demand_for_ratio = direct_value
+                elif direct_metric["status"] == "ok" and match_type == "exact":
+                    demand_basis = "keyword_direct_zero"
+                    demand_status = "no_demand"
+                    keyword_status = "no_demand"
+                    demand_for_ratio = 0
+                elif direct_metric["status"] == "ok":
+                    demand_basis = "keyword_direct_unverified"
+                    demand_status = "no_demand"
+                    keyword_status = "related_only"
+                    demand_for_ratio = 0
+                else:
+                    demand_basis = "keyword_direct_unverified"
+                    demand_status = "no_demand"
+                    keyword_status = direct_metric["status"]
+                    demand_for_ratio = 0
+
+                res.update({
+                    "keyword_demand": direct_value if keyword_status in {"ok", "no_demand"} else None,
+                    "keyword_demand_adjusted": self._trend_adjusted_demand(demand_for_ratio, google_trend_weight),
+                    "keyword_demand_status": keyword_status,
+                    "keyword_demand_match": matched_keyword,
+                })
+                self._apply_demand_basis(res, demand_for_ratio, demand_status, demand_basis, google_trend_weight)
+                import asyncio
+                await asyncio.sleep(self.config.request_delay)
+            else:
+                self._apply_demand_basis(
+                    res, topic_naver_demand, topic_demand_status,
+                    "topic_fallback_unverified", google_trend_weight
+                )
+
+        temp_results.sort(key=lambda x: (
+            x["relevance_score"] < 50,
+            not self._has_verified_direct_demand(x),
+            x["naver_ratio"] is None,
+            x["naver_ratio"] if x["naver_ratio"] is not None else float("inf"),
+            x["naver_docs"] if x["naver_docs"] >= 0 else float("inf"),
+        ))
+
+        # 3차 평가: 상위 5개 키워드만 유튜브 데이터 수집 (Lazy Evaluation)
         quota_exceeded = False
         
         for i, res in enumerate(temp_results):
-            if i < MAX_YOUTUBE_QUERIES and not quota_exceeded:
+            if i < self.MAX_YOUTUBE_QUERIES and not quota_exceeded:
                 yt_data = await self._measure_youtube_metrics(res["keyword"])
-                
-                if yt_data.get("quota_exceeded"):
+
+                yt_status = yt_data.get("status", "ok")
+                if yt_status == "quota_exceeded":
                     quota_exceeded = True
                     yt_stars = "- (할당량 초과)"
                     recent_vids = 0
+                    yt_ratio = None
                 else:
                     recent_vids = yt_data.get("recent_videos", 0)
-                    if total_demand > 0:
-                        yt_ratio = recent_vids / max(1, (total_demand / 1000.0))
+                    if yt_status == "ok" and res["analysis_demand"] > 0:
+                        yt_ratio = recent_vids / max(1, (res["analysis_demand"] / 1000.0))
                         if yt_ratio <= 0.5:
                             yt_stars = "★★★"
                         elif yt_ratio <= 1.5:
@@ -342,38 +674,68 @@ class AutoAuthorPipeline:
                         else:
                             yt_stars = "★"
                     else:
-                        if recent_vids <= 3:
-                            yt_stars = "★★★"
-                        elif recent_vids <= 10:
-                            yt_stars = "★★"
-                        else:
-                            yt_stars = "★"
+                        yt_stars = "-"
+                        yt_ratio = None
+
+                yt_score = self._score_ratio(yt_ratio, self.YOUTUBE_GOLDEN_RATIO, self.YOUTUBE_PROMISING_RATIO)
+                is_golden = self._is_golden_candidate(res, yt_status, yt_stars)
+                reasons = self._build_golden_reasons(res, yt_status, yt_stars)
                             
                 res.update({
                     "yt_total_videos": yt_data.get("total_videos", 0),
                     "yt_total_avg_views": yt_data.get("total_avg_views", 0),
                     "yt_recent_videos": recent_vids,
                     "yt_recent_avg_views": yt_data.get("recent_avg_views", 0),
+                    "yt_status": yt_status,
+                    "yt_ratio": yt_ratio,
                     "yt_stars": yt_stars,
-                    "is_golden": res["naver_stars"] == "★★★" or yt_stars == "★★★"
+                    "score": self._best_platform_score(res["score"], yt_score),
+                    "confidence": self._confidence_score(
+                        res["demand_status"], res["analysis_demand"],
+                        res["naver_status"], res["kakao_status"], yt_status,
+                        google_trend_weight, res["demand_basis"]
+                    ),
+                    "is_golden": is_golden,
+                    "golden_reason": " / ".join(reasons),
                 })
+                self._apply_score_gates(res)
+                res["verdict"] = self._verdict_label(res)
                 # 유튜브 API 딜레이 추가
                 import asyncio
                 await asyncio.sleep(self.config.request_delay)
             else:
                 # 할당량 초과 또는 상위 5위 밖 키워드는 스킵
+                yt_status = "quota_exceeded" if quota_exceeded else "skipped"
+                yt_stars = "- (조회 생략)" if not quota_exceeded else "- (할당량 초과)"
+                is_golden = self._is_golden_candidate(res, yt_status, yt_stars)
+                reasons = self._build_golden_reasons(res, yt_status, yt_stars)
                 res.update({
                     "yt_total_videos": 0,
                     "yt_total_avg_views": 0,
                     "yt_recent_videos": 0,
                     "yt_recent_avg_views": 0,
-                    "yt_stars": "- (조회 생략)" if not quota_exceeded else "- (할당량 초과)",
-                    "is_golden": res["naver_stars"] == "★★★"
+                    "yt_status": yt_status,
+                    "yt_ratio": None,
+                    "yt_stars": yt_stars,
+                    "is_golden": is_golden,
+                    "golden_reason": " / ".join(reasons),
                 })
+                self._apply_score_gates(res)
+                res["verdict"] = self._verdict_label(res)
+
+        temp_results.sort(key=lambda x: (
+            not x.get("is_golden"),
+            -x.get("score", 0),
+            -x.get("confidence", 0),
+            x["relevance_score"] < 50,
+        ))
 
         return temp_results
 
     async def _measure_naver_ad(self, keyword: str) -> int:
+        return (await self._measure_naver_ad_metrics(keyword))["value"]
+
+    async def _measure_naver_ad_metrics(self, keyword: str) -> dict:
         """네이버 검색광고 API — 시드 키워드의 PC+Mobile 월간 검색량 반환"""
         import time as _time
         import base64
@@ -382,6 +744,7 @@ class AutoAuthorPipeline:
         import aiohttp
         
         # 네이버 검색광고 API는 공백 제거된 키워드만 인식
+        original_keyword = keyword
         keyword = keyword.replace(" ", "")
         
         customer_id = getattr(self.config, "naver_ad_customer_id", "")
@@ -389,7 +752,7 @@ class AutoAuthorPipeline:
         secret_key = getattr(self.config, "naver_ad_secret", "")
         
         if not (customer_id and api_key and secret_key):
-            return 0
+            return self._metric(0, "missing_key", "Naver Search Ad credentials missing")
             
         timestamp = str(int(_time.time() * 1000))
         method = "GET"
@@ -405,7 +768,7 @@ class AutoAuthorPipeline:
             "X-Signature": sig
         }
         params = {"hintKeywords": keyword, "showDetail": "1"}
-        url = "https://api.naver.com" + path
+        url = "https://api.searchad.naver.com" + path
         
         try:
             async with aiohttp.ClientSession() as s:
@@ -415,15 +778,42 @@ class AutoAuthorPipeline:
                         data = await r.json()
                         items = data.get("keywordList", [])
                         if items:
-                            item = items[0]
-                            pc = item.get("monthlyPcQcCnt", 0)
-                            mobile = item.get("monthlyMobileQcCnt", 0)
-                            pc = 5 if isinstance(pc, str) and "<" in pc else int(pc)
-                            mobile = 5 if isinstance(mobile, str) and "<" in mobile else int(mobile)
-                            return pc + mobile
-                    return 0
-        except Exception:
-            return 0
+                            def normalize_ad_keyword(value: str) -> str:
+                                return self._normalize_keyword(str(value).replace(" ", ""))
+
+                            def parse_count(value) -> int:
+                                if isinstance(value, str):
+                                    if "<" in value:
+                                        return 5
+                                    value = value.replace(",", "").strip()
+                                try:
+                                    return int(value)
+                                except (TypeError, ValueError):
+                                    return 0
+
+                            query_norm = normalize_ad_keyword(keyword)
+                            exact_item = next(
+                                (
+                                    item for item in items
+                                    if normalize_ad_keyword(item.get("relKeyword", "")) == query_norm
+                                ),
+                                None,
+                            )
+                            item = exact_item or items[0]
+                            pc = parse_count(item.get("monthlyPcQcCnt", 0))
+                            mobile = parse_count(item.get("monthlyMobileQcCnt", 0))
+                            metric = self._metric(pc + mobile, "ok")
+                            metric.update({
+                                "matched_keyword": item.get("relKeyword", original_keyword),
+                                "match_type": "exact" if exact_item else "related",
+                                "pc": pc,
+                                "mobile": mobile,
+                            })
+                            return metric
+                        return self._metric(0, "no_data", "keywordList empty")
+                    return self._metric(0, "error", f"Naver Search Ad HTTP {r.status}")
+        except Exception as e:
+            return self._metric(0, "error", str(e))
 
     async def _measure_youtube_market(self, keyword: str) -> int:
         """유튜브 시장규모 측정 — 시드 키워드 상위 10개 영상 평균 조회수"""
@@ -474,7 +864,7 @@ class AutoAuthorPipeline:
         from datetime import datetime, timedelta, timezone
         yt_key = getattr(self.config, "youtube_api_key", "")
         if not yt_key:
-            return {"total_videos": 0, "total_avg_views": 0, "recent_videos": 0, "recent_avg_views": 0}
+            return {"status": "missing_key", "total_videos": 0, "total_avg_views": 0, "recent_videos": 0, "recent_avg_views": 0}
         
         async def fetch_metrics(session, params):
             try:
@@ -484,7 +874,7 @@ class AutoAuthorPipeline:
                         if r.status == 403:
                             print("    ❌ YouTube API 할당량(Quota) 초과! (이후 유튜브 지표는 0으로 처리됩니다)")
                             return -1, -1
-                        return 0, 0
+                        return -2, -2
                     data = await r.json()
                     total_res = data.get("pageInfo", {}).get("totalResults", 0)
                     video_ids = [item["id"]["videoId"] for item in data.get("items", []) if item.get("id", {}).get("videoId")]
@@ -501,7 +891,7 @@ class AutoAuthorPipeline:
                     avg_views = int(sum(views) / len(views)) if views else 0
                     return total_res, avg_views
             except Exception:
-                return 0, 0
+                return -2, -2
 
         try:
             async with aiohttp.ClientSession() as s:
@@ -518,16 +908,19 @@ class AutoAuthorPipeline:
                 )
                 
                 if total_res[0] == -1 or ts_res[0] == -1:
-                    return {"quota_exceeded": True}
+                    return {"status": "quota_exceeded", "quota_exceeded": True}
+                if total_res[0] == -2 or ts_res[0] == -2:
+                    return {"status": "error", "total_videos": 0, "total_avg_views": 0, "recent_videos": 0, "recent_avg_views": 0}
                 
                 return {
+                    "status": "ok",
                     "total_videos": total_res[0],
                     "total_avg_views": total_res[1],
                     "recent_videos": ts_res[0],
                     "recent_avg_views": ts_res[1],
                 }
         except Exception as e:
-            return {"total_videos": 0, "total_avg_views": 0, "recent_videos": 0, "recent_avg_views": 0}
+            return {"status": "error", "total_videos": 0, "total_avg_views": 0, "recent_videos": 0, "recent_avg_views": 0}
 
     def _export_unified_csv(self, analyses_by_title: dict, mode: str = "autopilot"):
         import pandas as pd
@@ -538,25 +931,54 @@ class AutoAuthorPipeline:
             for a in analyses:
                 rows.append({
                     "콘텐츠명(주제)": t,
-                    "구글_트렌드(%)": a["google_trend_pct"],
-                    "통합검색수요(전체)": a["total_demand"],
                     "하위_키워드": a["keyword"],
+                    "추천요약": a.get("verdict", self._verdict_label(a)),
+                    "황금키워드": "Y" if a.get("is_golden") else "N",
+                    "기회점수(0-100)": a.get("score", 0),
+                    "신뢰도(0-100)": a.get("confidence", 0),
+                    "관련도(0-100)": a.get("relevance_score", 0),
+                    "관련도_상태": a.get("relevance_status", ""),
+                    "구글트렌드_최근관심도(0-100)": a["google_trend_pct"],
+                    "주제검색수요(월간)": a.get("topic_demand"),
+                    "주제기반_통합수요(월간)": a.get("topic_total_demand"),
+                    "키워드검색수요(월간_직접)": a.get("keyword_demand"),
+                    "키워드수요_상태": self._status_label(a.get("keyword_demand_status", "")),
+                    "키워드수요_매칭": a.get("keyword_demand_match", ""),
+                    "분석기준수요(월간)": a.get("analysis_demand", a.get("total_demand")),
+                    "수요기준": self._demand_basis_label(a.get("demand_basis", "")),
+                    "수요상태": self._status_label(a.get("demand_status", "")),
                     "총문서량(네이버)": a["naver_docs"],
+                    "네이버_포화율(%)": self._ratio_to_percent(a.get("naver_ratio")),
+                    "네이버_상태": self._status_label(a.get("naver_status", "")),
                     "추천도(네이버)": a["naver_stars"],
                     "총문서량(다음)": a["kakao_docs"],
+                    "다음_포화율(%)": self._ratio_to_percent(a.get("kakao_ratio")),
+                    "다음_상태": self._status_label(a.get("kakao_status", "")),
                     "추천도(티스토리)": a["kakao_stars"],
                     "총영상수(유튜브)": a["yt_total_videos"],
                     "평균조회수(유튜브)": a["yt_total_avg_views"],
                     "최근30일_영상수(유튜브)": a["yt_recent_videos"],
                     "최근30일_조회수(유튜브)": a["yt_recent_avg_views"],
+                    "유튜브_최근공급지수(영상/천검색)": self._round_metric(a.get("yt_ratio")),
+                    "유튜브_상태": self._status_label(a.get("yt_status", "")),
                     "추천도(유튜브)": a["yt_stars"],
+                    "판정근거": a.get("golden_reason", ""),
                 })
         if rows:
             os.makedirs("results", exist_ok=True)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             csv_path = f"results/키워드분석_통합_{mode}_{timestamp}.csv"
             pd.DataFrame(rows).to_csv(csv_path, index=False, encoding="utf-8-sig")
+            json_path = f"results/키워드분석_통합_{mode}_{timestamp}.json"
+            latest_path = "results/latest_portfolio.json"
+            payload = {"mode": mode, "generated_at": timestamp, "rows": rows}
+            import json
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+            with open(latest_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
             print(f"  💾 통합 CSV 저장 완료: {csv_path}")
+            print(f"  💾 대시보드 JSON 저장 완료: {latest_path}")
             return csv_path
         return None
 
@@ -589,6 +1011,9 @@ class AutoAuthorPipeline:
         return saved_files
 
     async def _measure_naver_blog(self, keyword: str) -> int:
+        return (await self._measure_naver_blog_metrics(keyword))["value"]
+
+    async def _measure_naver_blog_metrics(self, keyword: str) -> dict:
         """네이버 블로그 문서량 절대수치 반환 (OpenAPI 우선, 실패 시 스크래핑)"""
         import aiohttp
         
@@ -606,7 +1031,7 @@ class AutoAuthorPipeline:
                         if r.status == 200:
                             data = await r.json()
                             total = data.get("total", 0)
-                            return total
+                            return self._metric(total, "ok")
             except Exception:
                 pass # OpenAPI 실패 시 스크래핑으로 폴백
 
@@ -621,13 +1046,21 @@ class AutoAuthorPipeline:
             async with aiohttp.ClientSession() as s:
                 async with s.get(url, params=params, headers=headers, timeout=10) as r:
                     if r.status != 200:
-                        return -1
+                        return self._metric(-1, "error", f"Naver Blog HTTP {r.status}")
                     from bs4 import BeautifulSoup
                     soup = BeautifulSoup(await r.text(), "html.parser")
                     items = soup.select(".total_wrap") or soup.select(".api_subject_bx") or soup.select("a.title_link")
-                    return len(items)
-        except Exception:
-            return -1
+                    return self._metric(len(items), "ok")
+        except Exception as e:
+            return self._metric(-1, "error", str(e))
+
+    async def _measure_kakao_blog_metrics(self, keyword: str) -> dict:
+        if not getattr(self.config, "kakao_api_key", ""):
+            return self._metric(-1, "missing_key", "Kakao REST API key missing")
+        value = await self.kakao.get_blog_count(keyword)
+        if value < 0:
+            return self._metric(value, "error", "Kakao blog count failed")
+        return self._metric(value, "ok")
 
     @staticmethod
     def _classify_intent(keyword: str) -> str:
@@ -649,7 +1082,7 @@ async def _cli_main():
     parser.add_argument("--mode", choices=["copilot", "autopilot"], default="autopilot")
     parser.add_argument("--category", default="movie")
     parser.add_argument("--top", type=int, default=3)
-    parser.add_argument("--platforms", default="tistory", help="콤마 구분: tistory,naver,youtube,instagram,facebook,shortform,thread")
+    parser.add_argument("--platforms", default="tistory", help="콤마 구분: tistory,naver,youtube,instagram,facebook,shortform,thread,synergy")
     parser.add_argument("--titles", help="수동 분석할 타이틀 목록 (콤마 구분, 예: '마션,인터스텔라')")
     args = parser.parse_args()
 
@@ -687,7 +1120,7 @@ async def _cli_main():
                 result.plans.extend(plans)
         
         # 연계 콘텐츠(Synergy) 기획 추가 (여러 작품일 경우)
-        if len(titles) >= 2:
+        if "synergy" in platforms and len(titles) >= 2:
             print(f"\n🔗 [Synergy] {len(titles)}개 작품 연계 기획안 생성 중...")
             try:
                 synergy_plans = await pipeline.generator.generate_synergy_plan(

@@ -38,7 +38,7 @@ class KakaoSource(BaseTrendSource):
     async def get_blog_count(self, keyword: str) -> int:
         """카카오 블로그 검색 결과 총합(Supply) 반환"""
         if not self.api_key:
-            return 0
+            return -1
             
         headers = {"Authorization": f"KakaoAK {self.api_key}"}
         # 정확한 검색을 위해 따옴표 포함 추천 (사용자 선택)
@@ -49,16 +49,16 @@ class KakaoSource(BaseTrendSource):
             async with aiohttp.ClientSession() as s:
                 async with s.get(url, params=params, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as r:
                     if r.status != 200:
-                        return 0
+                        return -1
                     data = await r.json()
                     return data.get("meta", {}).get("total_count", 0)
         except Exception:
-            return 0
+            return -1
 
     async def get_web_count(self, keyword: str) -> int:
         """카카오 웹 검색 결과 총합 반환"""
         if not self.api_key:
-            return 0
+            return -1
             
         headers = {"Authorization": f"KakaoAK {self.api_key}"}
         params = {"query": keyword, "size": 1}
@@ -68,8 +68,8 @@ class KakaoSource(BaseTrendSource):
             async with aiohttp.ClientSession() as s:
                 async with s.get(url, params=params, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as r:
                     if r.status != 200:
-                        return 0
+                        return -1
                     data = await r.json()
                     return data.get("meta", {}).get("total_count", 0)
         except Exception:
-            return 0
+            return -1

@@ -17,5 +17,4 @@ PLATFORM_TEMPLATES = {
     "facebook": FacebookPostTemplate,
     "shortform": ShortformTemplate,
     "thread": ThreadXTemplate,
-    "synergy": SynergyTemplate,
 }
