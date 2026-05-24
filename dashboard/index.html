@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AutoAuthor Portfolio Dashboard</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">AutoAuthor SEO</p>
+        <h1>드라마 황금 키워드 분석</h1>
+      </div>
+      <div class="actions">
+        <button id="loadLatest" type="button" title="results/latest_portfolio.json 다시 불러오기">최신 결과</button>
+        <button id="downloadCsv" type="button" title="현재 표를 CSV로 저장">CSV 저장</button>
+        <label class="file-button" title="AutoAuthor CSV 또는 JSON 업로드">
+          CSV/JSON 업로드
+          <input id="fileInput" type="file" accept=".csv,.json,application/json,text/csv">
+        </label>
+      </div>
+    </header>
+
+    <section class="workflow-grid" aria-label="분석 실행">
+      <article class="tool-panel">
+        <div class="panel-head compact">
+          <h2>흥행 드라마 발굴</h2>
+          <span id="apiBadge" class="badge warn">로컬 데이터</span>
+        </div>
+        <div class="inline-controls">
+          <select id="categorySelect" aria-label="카테고리">
+            <option value="drama">드라마</option>
+            <option value="movie">영화</option>
+          </select>
+          <button id="findTrends" type="button">트렌드 찾기</button>
+        </div>
+        <div id="trendList" class="trend-list"></div>
+      </article>
+
+      <article class="tool-panel primary-tool">
+        <div class="panel-head compact">
+          <h2>제목으로 분석</h2>
+          <span id="runState" class="badge">대기</span>
+        </div>
+        <div class="title-runner">
+          <input id="titleInput" type="text" placeholder="예: 군체, 오십프로" autocomplete="off">
+          <button id="runAnalysis" type="button">분석 실행</button>
+        </div>
+        <div id="commandBox" class="command-box" hidden></div>
+      </article>
+
+      <article class="tool-panel">
+        <div class="panel-head compact">
+          <h2>오늘의 공략</h2>
+          <span id="focusCount" class="badge gold">0</span>
+        </div>
+        <div id="actionList" class="action-list"></div>
+      </article>
+    </section>
+
+    <section class="summary-grid" aria-label="핵심 지표">
+      <article class="metric">
+        <span>분석 키워드</span>
+        <strong id="metricTotal">0</strong>
+      </article>
+      <article class="metric">
+        <span>황금 키워드</span>
+        <strong id="metricGolden">0</strong>
+      </article>
+      <article class="metric">
+        <span>직접수요 확인</span>
+        <strong id="metricDirect">0</strong>
+      </article>
+      <article class="metric">
+        <span>최고 기회점수</span>
+        <strong id="metricScore">0</strong>
+      </article>
+    </section>
+
+    <section class="layout">
+      <article class="panel">
+        <div class="panel-head">
+          <h2>키워드 검증 퍼널</h2>
+          <p>후보에서 실제 황금 키워드까지 보수적으로 거른 흐름</p>
+        </div>
+        <div id="funnel" class="funnel"></div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head">
+          <h2>수요 대비 공급 매트릭스</h2>
+          <p>오른쪽 아래에 가까울수록 검증된 기회 영역</p>
+        </div>
+        <svg id="matrix" class="matrix" viewBox="0 0 640 360" role="img" aria-label="키워드 기회 매트릭스"></svg>
+      </article>
+    </section>
+
+    <section class="layout">
+      <article class="panel">
+        <div class="panel-head">
+          <h2>상위 판정 키워드</h2>
+          <div class="table-tools">
+            <select id="topicFilter" aria-label="주제 필터">
+              <option value="all">전체 주제</option>
+            </select>
+            <select id="verdictFilter" aria-label="판정 필터">
+              <option value="all">전체 판정</option>
+              <option value="gold">공략 우선</option>
+              <option value="candidate">추가 검토</option>
+              <option value="hold">보류</option>
+              <option value="exclude">제외</option>
+            </select>
+            <input id="keywordSearch" type="search" placeholder="키워드 검색">
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>키워드</th>
+                <th>판정</th>
+                <th>직접수요</th>
+                <th>네이버 포화율</th>
+                <th>점수/신뢰도</th>
+                <th>근거</th>
+              </tr>
+            </thead>
+            <tbody id="keywordRows"></tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head">
+          <h2>데이터 상태</h2>
+          <p>오탐을 막기 위해 실패와 보류 상태를 분리 표시</p>
+        </div>
+        <div id="statusList" class="status-list"></div>
+      </article>
+    </section>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>

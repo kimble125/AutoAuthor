@@ -166,6 +166,7 @@ async def _main():
     from .sources import (
         NaverDataLabSource, GoogleTrendsSource, TMDBSource,
         GoogleNewsSource, GoogleSuggestSource, WatchaPediaSource,
+        NaverSuggestSource
     )
 
     cfg = load_config()
@@ -179,6 +180,7 @@ async def _main():
         sources.append(TMDBSource(cfg.tmdb_api_key, cfg.tmdb_read_access_token))
     sources.append(GoogleNewsSource())
     sources.append(GoogleSuggestSource())
+    sources.append(NaverSuggestSource())
 
     # Optional
     if cfg.enable_watcha_pedia:

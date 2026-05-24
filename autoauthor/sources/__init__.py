@@ -6,10 +6,11 @@ from .google_news_rss import GoogleNewsSource
 from .google_suggest import GoogleSuggestSource
 from .watcha_pedia import WatchaPediaSource
 from .kakao import KakaoSource
+from .naver_suggest import NaverSuggestSource
 
 __all__ = [
     "BaseTrendSource", "TrendItem", "SourceUnavailableError",
     "NaverDataLabSource", "GoogleTrendsSource", "TMDBSource",
     "GoogleNewsSource", "GoogleSuggestSource", "WatchaPediaSource",
-    "KakaoSource",
+    "KakaoSource", "NaverSuggestSource",
 ]

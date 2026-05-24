@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900">
+  <rect width="1440" height="900" fill="#f6f7f9"/>
+  <rect x="48" y="48" width="1344" height="804" rx="8" fill="#fff" stroke="#d8dde5"/>
+  <text x="88" y="116" font-family="Inter, Pretendard, Arial, sans-serif" font-size="22" font-weight="700" fill="#2867c7">AutoAuthor SEO</text>
+  <text x="88" y="166" font-family="Inter, Pretendard, Arial, sans-serif" font-size="48" font-weight="800" fill="#17202a">황금 키워드 검증 대시보드</text>
+  <text x="88" y="206" font-family="Inter, Pretendard, Arial, sans-serif" font-size="20" fill="#657181">API 실패와 수요 0을 분리해 검증된 키워드만 콘텐츠 전략으로 연결</text>
+
+  <g transform="translate(88 264)">
+    <rect width="280" height="132" rx="8" fill="#f8fafc" stroke="#d8dde5"/>
+    <text x="24" y="42" font-family="Inter, Pretendard, Arial, sans-serif" font-size="17" font-weight="700" fill="#657181">분석 키워드</text>
+    <text x="24" y="104" font-family="Inter, Pretendard, Arial, sans-serif" font-size="58" font-weight="800" fill="#17202a">12</text>
+  </g>
+  <g transform="translate(392 264)">
+    <rect width="280" height="132" rx="8" fill="#fff9ed" stroke="#f2d28f"/>
+    <text x="24" y="42" font-family="Inter, Pretendard, Arial, sans-serif" font-size="17" font-weight="700" fill="#8a5a00">황금 키워드</text>
+    <text x="24" y="104" font-family="Inter, Pretendard, Arial, sans-serif" font-size="58" font-weight="800" fill="#c98912">4</text>
+  </g>
+  <g transform="translate(696 264)">
+    <rect width="280" height="132" rx="8" fill="#f0fbf6" stroke="#bde8d3"/>
+    <text x="24" y="42" font-family="Inter, Pretendard, Arial, sans-serif" font-size="17" font-weight="700" fill="#0c7449">평균 신뢰도</text>
+    <text x="24" y="104" font-family="Inter, Pretendard, Arial, sans-serif" font-size="58" font-weight="800" fill="#14a66a">88</text>
+  </g>
+  <g transform="translate(1000 264)">
+    <rect width="280" height="132" rx="8" fill="#f3f7ff" stroke="#c4d8ff"/>
+    <text x="24" y="42" font-family="Inter, Pretendard, Arial, sans-serif" font-size="17" font-weight="700" fill="#2867c7">최고 기회점수</text>
+    <text x="24" y="104" font-family="Inter, Pretendard, Arial, sans-serif" font-size="58" font-weight="800" fill="#2867c7">100</text>
+  </g>
+
+  <g transform="translate(88 456)">
+    <text x="0" y="0" font-family="Inter, Pretendard, Arial, sans-serif" font-size="26" font-weight="800" fill="#17202a">검증 퍼널</text>
+    <g transform="translate(0 42)">
+      <text x="0" y="18" font-family="Inter, Pretendard, Arial, sans-serif" font-size="17" font-weight="700" fill="#657181">후보 수집</text>
+      <rect x="140" y="0" width="520" height="24" rx="8" fill="#2867c7"/>
+      <text x="684" y="20" font-family="Inter, Pretendard, Arial, sans-serif" font-size="18" font-weight="800" fill="#17202a">12</text>
+    </g>
+    <g transform="translate(0 92)">
+      <text x="0" y="18" font-family="Inter, Pretendard, Arial, sans-serif" font-size="17" font-weight="700" fill="#657181">수요 확인</text>
+      <rect x="140" y="0" width="520" height="24" rx="8" fill="#14a66a"/>
+      <text x="684" y="20" font-family="Inter, Pretendard, Arial, sans-serif" font-size="18" font-weight="800" fill="#17202a">12</text>
+    </g>
+    <g transform="translate(0 142)">
+      <text x="0" y="18" font-family="Inter, Pretendard, Arial, sans-serif" font-size="17" font-weight="700" fill="#657181">공급 측정</text>
+      <rect x="140" y="0" width="520" height="24" rx="8" fill="#c98912"/>
+      <text x="684" y="20" font-family="Inter, Pretendard, Arial, sans-serif" font-size="18" font-weight="800" fill="#17202a">12</text>
+    </g>
+    <g transform="translate(0 192)">
+      <text x="0" y="18" font-family="Inter, Pretendard, Arial, sans-serif" font-size="17" font-weight="700" fill="#657181">황금 확정</text>
+      <rect x="140" y="0" width="173" height="24" rx="8" fill="#d83f4c"/>
+      <text x="684" y="20" font-family="Inter, Pretendard, Arial, sans-serif" font-size="18" font-weight="800" fill="#17202a">4</text>
+    </g>
+  </g>
+
+  <g transform="translate(840 456)">
+    <text x="0" y="0" font-family="Inter, Pretendard, Arial, sans-serif" font-size="26" font-weight="800" fill="#17202a">황금 키워드 샘플</text>
+    <rect x="0" y="34" width="440" height="54" rx="8" fill="#fff9ed" stroke="#f2d28f"/>
+    <text x="20" y="68" font-family="Inter, Pretendard, Arial, sans-serif" font-size="20" font-weight="800" fill="#17202a">마션 첫 문장</text>
+    <text x="344" y="68" font-family="Inter, Pretendard, Arial, sans-serif" font-size="20" font-weight="800" fill="#c98912">100</text>
+    <rect x="0" y="104" width="440" height="54" rx="8" fill="#fff" stroke="#d8dde5"/>
+    <text x="20" y="138" font-family="Inter, Pretendard, Arial, sans-serif" font-size="20" font-weight="800" fill="#17202a">마션 실화</text>
+    <text x="344" y="138" font-family="Inter, Pretendard, Arial, sans-serif" font-size="20" font-weight="800" fill="#c98912">96.6</text>
+    <rect x="0" y="174" width="440" height="54" rx="8" fill="#fff" stroke="#d8dde5"/>
+    <text x="20" y="208" font-family="Inter, Pretendard, Arial, sans-serif" font-size="20" font-weight="800" fill="#17202a">마션 다시 보기</text>
+    <text x="344" y="208" font-family="Inter, Pretendard, Arial, sans-serif" font-size="20" font-weight="800" fill="#c98912">93.2</text>
+  </g>
+
+  <text x="88" y="812" font-family="Inter, Pretendard, Arial, sans-serif" font-size="18" fill="#657181">실측: 2026-05-24 · 데이터: results/latest_portfolio.json · 안전장치: missing_key / quota_exceeded / no_demand / error 제외</text>
+</svg>

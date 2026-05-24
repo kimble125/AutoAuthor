@@ -61,6 +61,8 @@ class ContentGenerator:
 
         results = []
         for pf in platforms:
+            if pf == "synergy":
+                continue
             try:
                 plan = await self.generate_plan(title, content_type, keywords, pf)
                 results.append(plan)
