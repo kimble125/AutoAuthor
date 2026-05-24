@@ -70,7 +70,9 @@ h2 {
 }
 
 button,
-.file-button {
+.file-button,
+select,
+input {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -87,12 +89,128 @@ button,
 }
 
 button:hover,
-.file-button:hover {
+.file-button:hover,
+select:hover,
+input:hover {
   border-color: #9aa6b6;
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+select,
+input {
+  justify-content: flex-start;
+  min-width: 0;
+  cursor: text;
+}
+
+select {
+  cursor: pointer;
 }
 
 .file-button input {
   display: none;
+}
+
+.workflow-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.9fr) minmax(380px, 1.1fr) minmax(280px, 0.8fr);
+  gap: 12px;
+  margin: 18px 0 16px;
+}
+
+.tool-panel {
+  min-height: 186px;
+  padding: 16px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.primary-tool {
+  border-color: #b7cae8;
+}
+
+.panel-head.compact {
+  margin-bottom: 12px;
+}
+
+.panel-head.compact h2 {
+  line-height: 1.25;
+}
+
+.inline-controls,
+.title-runner,
+.table-tools {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.inline-controls select {
+  flex: 0 0 120px;
+}
+
+.title-runner input {
+  flex: 1;
+}
+
+.title-runner button {
+  flex: 0 0 auto;
+}
+
+.trend-list,
+.action-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.trend-card {
+  display: grid;
+  justify-content: stretch;
+  justify-items: start;
+  min-height: 54px;
+  padding: 9px 10px;
+  text-align: left;
+}
+
+.trend-card strong,
+.action-item strong {
+  overflow-wrap: anywhere;
+}
+
+.trend-card span,
+.action-item span,
+.empty-state {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.action-item {
+  display: grid;
+  gap: 4px;
+  min-height: 48px;
+  padding: 10px;
+  border: 1px solid #edf0f4;
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.command-box {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid #d9c48b;
+  border-radius: 8px;
+  background: #fff8e8;
+  color: #5b4300;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
 }
 
 .summary-grid {
@@ -154,6 +272,16 @@ button:hover,
   font-size: 13px;
   line-height: 1.5;
   text-align: right;
+}
+
+.table-tools {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.table-tools select,
+.table-tools input {
+  min-width: 132px;
 }
 
 .funnel {
@@ -243,6 +371,21 @@ th {
   background: #fff3d7;
 }
 
+.badge.candidate {
+  color: #164a96;
+  background: #e6f0ff;
+}
+
+.badge.hold {
+  color: #715008;
+  background: #fff5cf;
+}
+
+.badge.exclude {
+  color: #475160;
+  background: #eef1f5;
+}
+
 .badge.ok {
   color: #0c7449;
   background: #dff6ec;
@@ -288,7 +431,19 @@ th {
   }
 
   .summary-grid,
+  .workflow-grid,
   .layout {
     grid-template-columns: 1fr;
+  }
+
+  .inline-controls,
+  .title-runner,
+  .table-tools {
+    display: grid;
+  }
+
+  .inline-controls select,
+  .title-runner button {
+    flex: auto;
   }
 }

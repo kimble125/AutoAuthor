@@ -134,6 +134,9 @@ python3 -m autoauthor --titles "마션, 인터스텔라" --platforms "tistory,yo
 
 # 전자동 트렌드 탐지 및 기획 (Autopilot)
 python3 -m autoauthor --mode autopilot --top 5
+
+# 로컬 웹 서비스 실행
+python3 dashboard/server.py --port 8766
 ```
 
 ### 4. 결과 출력 (Output)
@@ -280,9 +283,20 @@ H2-5: 마치며 — 총평 및 추천
 
 ## 웹 대시보드 | Web Dashboard
 
-분석 결과를 팀과 공유할 수 있는 인터랙티브 대시보드:
+분석 결과를 팀과 공유하고, 초심자도 제목 입력만으로 분석을 시작할 수 있는 로컬 대시보드:
 
 **→ [Live Demo](https://seokeyword-qjyzzhbx.manus.space)**
+
+로컬 실행:
+
+```bash
+python3 dashboard/server.py --port 8766
+```
+
+브라우저에서 `http://127.0.0.1:8766`을 열면 아래 흐름을 바로 사용할 수 있습니다.
+- `흥행 드라마 발굴`: 트렌드 소스에서 최근 후보를 찾고 클릭하면 분석으로 연결
+- `제목으로 분석`: 드라마 제목을 입력하면 기존 파이프라인으로 황금 키워드 산출
+- `상위 판정 키워드`: 공략 우선, 후보, 보류, 제외를 필터링하고 CSV로 저장
 
 #### 📸 대시보드 주요 스크린샷
 
@@ -295,8 +309,11 @@ H2-5: 마치며 — 총평 및 추천
 *Gemini 2.5 Pro가 즉시 발행 가능한 맞춤형 기획안 3종을 제안하는 화면*
 
 주요 기능:
+- 최근 흥행 드라마 후보 탐색
+- 드라마 제목 직접 입력 분석
 - CSV 파일 업로드 → 키워드 테이블 실시간 갱신
 - `results/latest_portfolio.json` 자동 로딩
+- 판정/주제/키워드 필터 및 CSV 저장
 - 화제성 × 포화도 전략 매트릭스 시각화
 - 트렌드 미니 차트 (7일간 검색량 패턴)
 - AI 기획안 3종 예시 카드
